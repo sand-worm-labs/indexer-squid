@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/daniel/development/perpl/**)",
+      "Bash(cd /home/daniel/development/perpl && cat README.md package.json .env.example; head -120 config.yaml; ls -R src | head -30; wc -l src/* src/*/* 2>/dev/null; cd ../perpl-squid; cat src/main.ts schema.graphql commands.json .env tsconfig.json docker-compose.yml abi/README.md .claude/settings.json; head -30 src/model/index.ts)",
+      "Bash(cd /home/daniel/development/perpl && sed -n 120,400p config.yaml | cut -c1-200 | grep -v \"^    - event\" ; cat schema.graphql)",
+      "Read(//home/daniel/development/perpl/src/handlers/**)",
+      "Bash(python3 -I -)",
+      "Bash(grep -n \"event_id\\\\|^type.*{$\" schema.graphql)",
+      "Bash(curl -s https://portal.sqd.dev/datasets)",
+      "Bash(python3 -I -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\([x for x in d if 'monad' in json.dumps\\(x\\).lower\\(\\)]\\)\")",
+      "Bash(npx squid-evm-typegen *)",
+      "Bash(cd /home/daniel/development/perpl-squid/node_modules/@subsquid && ls evm-stream/lib; grep -rn \"timestamp\" evm-stream/lib/*.d.ts evm-objects/lib/*.d.ts | head; grep -n \"topic0\\\\|addLog\" evm-stream/lib/data-source.d.ts evm-stream/lib/query.d.ts 2>/dev/null | head; ls evm-objects/lib; cat ../../src/abi/Exchange/index.ts; sed -n 1,40p evm-stream/README.md 2>/dev/null)",
+      "Read(//home/daniel/src/abi/Exchange/**)",
+      "Bash(node -e ' *)",
+      "Bash(sed -i \"s/const META = .*/const META = ['block', 'blockTime', 'txHash', 'logIndex']/; s/  blockNumber: Int! @index/  block: Int! @index/; s/  timestamp: DateTime! @index/  blockTime: DateTime! @index/\" scripts/generate.js)",
+      "Bash(node scripts/generate.js)",
+      "Bash(npx squid-typeorm-codegen *)",
+      "Bash(sed -i \"s/Exchange_\\\\${entityName}/Exchange\\\\${entityName}/; s/id: 'event_id'/id: 'eventId'/\" scripts/generate.js)"
+    ],
+    "additionalDirectories": [
+      "/home/daniel/development/perpl-squid",
+      "/home/daniel/development/perpl"
+    ]
+  }
+}

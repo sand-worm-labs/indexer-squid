@@ -1,0 +1,31 @@
+import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, IntColumn as IntColumn_, Index as Index_, DateTimeColumn as DateTimeColumn_, StringColumn as StringColumn_, BigIntColumn as BigIntColumn_, BooleanColumn as BooleanColumn_} from "@subsquid/typeorm-store"
+
+@Entity_()
+export class ExchangeCrossesBook {
+    constructor(props?: Partial<ExchangeCrossesBook>) {
+        Object.assign(this, props)
+    }
+
+    @PrimaryColumn_()
+    id!: string
+
+    @Index_("idx_exchange_crosses_book_block_14caaa05")
+    @IntColumn_({nullable: false})
+    block!: number
+
+    @Index_("idx_exchange_crosses_book_block_time_d89e4cff")
+    @DateTimeColumn_({nullable: false})
+    blockTime!: Date
+
+    @StringColumn_({nullable: false})
+    txHash!: string
+
+    @IntColumn_({nullable: false})
+    logIndex!: number
+
+    @BigIntColumn_({nullable: false})
+    minAskOrMaxBidPNS!: bigint
+
+    @BooleanColumn_({nullable: false})
+    maxOrdersChecked!: boolean
+}
