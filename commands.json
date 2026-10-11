@@ -36,10 +36,6 @@
         "cmd": ["squid-typeorm-migration", "generate"],
         "hidden": true
       },
-      "generate": {
-        "description": "Generate schema.graphql and src/events.ts from abi/Exchange.json",
-        "cmd": ["node", "scripts/generate.js"]
-      },
       "codegen": {
         "description": "Generate TypeORM entities from the schema file",
         "cmd": ["squid-typeorm-codegen"]

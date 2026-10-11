@@ -1,99 +1,48 @@
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/subsquid-labs/squid-evm-template)
+# Perpl Exchange squid
 
-# Ethereum / EVM indexer template (Squid SDK)
+[Subsquid](https://docs.sqd.ai) indexer for the Perpl Exchange on Monad mainnet (chain 143), proxy
+`0x34B6552d57a35a1D042CcAe1951BD1C370112a6F`. ABI: `abi/Exchange.json` (PerplFoundation/dex-sdk, contract revision `rc_v1.1.7-203-g0e5902dd`).
 
-This is a starter template of a squid indexer for EVM networks (Ethereum, Polygon, BSC, etc.). See [Squid SDK docs](https://docs.sqd.dev/en/sdk) for a complete reference.
+## Data model (`schema.graphql`)
 
-**Documentation:** [docs.sqd.dev](https://docs.sqd.dev) | [sqd.dev](https://sqd.dev)
+| Entity | What it is |
+| --- | --- |
+| `Market` | a perpetual (perpId), its parameters, mark/oracle price, last funding |
+| `Account` | an exchange account: owner address, latest balance, deposit/withdraw totals |
+| `Order` | a resting order: status `OPEN / FILLED / CANCELLED / CLEARED`, remaining and filled size |
+| `Trade` | one maker or taker fill |
+| `Position` | current state per (market, account), with realized PnL and funding |
+| `PositionChange` | every open / increase / decrease / close / invert / liquidation / deleverage / unwind / collateral change |
+| `Funding` | one row per funding event |
+| `CollateralTransfer` | deposits and withdrawals |
 
-The data source streams pre-filtered data from a public [SQD Network Portal](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/evm-stream) dataset — no API key or RPC endpoint is required, and it covers real-time unfinalized blocks. To extract EVM logs and transactions by a topic or a contract address, use [`.addLog()`](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/evm-stream/logs), [`.addTransaction()`](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/evm-stream/transactions), [`.addTrace()`](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/evm-stream/traces) or [`.addStateDiff()`](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/evm-stream/state-diffs) methods of the `DataSourceBuilder` defined in `src/main.ts`. Select data fields with [`.setFields()`](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/evm-stream/field-selection).
+Amounts are raw on-chain integers: `*PNS` price, `*LNS` lot size (scale with the market's `priceDecimals` / `lotDecimals`), `*CNS` collateral.
 
-The requested data is transformed in batches by a single handler provided to the [`run()`](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/batch-processor) function.
+## How events are mapped
 
-For a full list of supported networks and config options,
-check the [EVM Portal stream overview](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/evm-stream).
+Code is in `src/handlers.ts` (one `on(event, …)` per event) and `src/state.ts` (a per-batch entity cache, flushed at the end of each batch).
 
-For a step-by-step migration guide from TheGraph, see [the dedicated docs page](https://docs.sqd.dev/en/sdk/squid-sdk/evm/guides/migration/migrate-from-thegraph).
+- `OrderRequest(V2)` sets the order context for its transaction. `OrderPlaced`, `OrderChanged`, `OrderCancelled` and `TakerOrderFilled`
+  don't carry perpId/accountId, so they read it from that context. It is dropped at the end of the transaction or on `OrderBatchCompleted`.
+- Order ids are small and get reused, so `Order.id` is the placing log (`block-logIndex`) and open orders are looked up by (market, orderId, status OPEN).
+- Events not listed above (admin, config, error/diagnostic events) are not indexed.
 
-Dependencies: Node.js 20 or newer, Git, Docker.
+## Run
 
-## Quickstart
-
-```bash
-# 0. Install @subsquid/cli a.k.a. the sqd command globally
-npm i -g @subsquid/cli
-
-# 1. Retrieve the template
-sqd init my_squid_name -t evm
-cd my_squid_name
-
-# 2. Install dependencies
-npm i
-
-# 3. Start a Postgres database container and detach
-sqd up
-
-# 4. Build the squid
-sqd build
-
-# 5. Start both the squid processor and the GraphQL server
-sqd run .
-```
-A GraphiQL playground will be available at [localhost:4350/graphql](http://localhost:4350/graphql).
-
-You can also start squid services one by one:
-```bash
-sqd process
-sqd serve
+```sh
+npm ci
+sqd up                 # Postgres
+sqd process            # build, migrate, index
+sqd serve              # GraphQL on :4350
 ```
 
-## Dev flow
+Env (`.env`, see `.env.example`): `SQD_API_KEY`; optional `START_BLOCK` (set to the deploy block to skip empty history) and `PORTAL_URL`.
+Start from before the first `ContractAdded`, otherwise markets are created as placeholders (`perp-<id>`).
 
-### 1. Define database schema
+## Changing the schema or ABI
 
-Start development by defining the schema of the target database via `schema.graphql`.
-Schema definition consists of regular graphql type declarations annotated with custom directives.
-Full description of `schema.graphql` dialect is available [here](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/schema-files/schema-files-codegen).
-
-### 2. Generate TypeORM classes
-
-Mapping developers use TypeORM [EntityManager](https://typeorm.io/#/working-with-entity-manager)
-to interact with target database during data processing. All necessary entity classes are
-generated by the squid framework from `schema.graphql`. This is done by running `sqd codegen`
-command.
-
-### 3. Generate database migrations
-
-All database changes are applied through migration files located at `db/migrations`.
-`squid-typeorm-migration(1)` tool provides several commands to drive the process.
-
-```bash
-## drop create the database
-sqd down
-sqd up
-
-## replace any old schemas with a new one made from the entities
+```sh
+sqd typegen            # abi/*.json -> src/abi
+sqd codegen            # schema.graphql -> src/model
 sqd migration:generate
 ```
-See [docs on database migrations](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/typeorm-migration) for more details.
-
-### 4. Import ABI contract and generate interfaces to decode events
-
-It is necessary to import the respective ABI definition to decode EVM logs. One way to generate a type-safe facade class to decode EVM logs is by placing the relevant JSON ABIs to `./abi`, then using `squid-evm-typegen(1)` via an `sqd` script:
-
-```bash
-sqd typegen
-```
-
-See more details on the [`squid-evm-typegen` doc page](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/evm-typegen/generating-utility-modules).
-
-## Project conventions
-
-Squid tools assume a certain [project layout](https://docs.sqd.dev/en/sdk/squid-sdk/evm/reference/project-structure):
-
-* All compiled js files must reside in `lib` and all TypeScript sources in `src`.
-The layout of `lib` must reflect `src`.
-* All TypeORM classes must be exported by `src/model/index.ts` (`lib/model` module).
-* Database schema must be defined in `schema.graphql`.
-* Database migrations must reside in `db/migrations` and must be plain js files.
-* `sqd(1)` and `squid-*(1)` executables consult `.env` file for environment variables.

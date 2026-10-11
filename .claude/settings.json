@@ -16,7 +16,14 @@
       "Bash(sed -i \"s/const META = .*/const META = ['block', 'blockTime', 'txHash', 'logIndex']/; s/  blockNumber: Int! @index/  block: Int! @index/; s/  timestamp: DateTime! @index/  blockTime: DateTime! @index/\" scripts/generate.js)",
       "Bash(node scripts/generate.js)",
       "Bash(npx squid-typeorm-codegen *)",
-      "Bash(sed -i \"s/Exchange_\\\\${entityName}/Exchange\\\\${entityName}/; s/id: 'event_id'/id: 'eventId'/\" scripts/generate.js)"
+      "Bash(sed -i \"s/Exchange_\\\\${entityName}/Exchange\\\\${entityName}/; s/id: 'event_id'/id: 'eventId'/\" scripts/generate.js)",
+      "Bash(docker compose *)",
+      "Bash(npx --yes npm-check-updates --filter='/subsquid/' --upgrade)",
+      "Bash(xxd)",
+      "WebSearch",
+      "WebFetch(domain:docs.rs)",
+      "Bash(pkill -f \"node lib/main.js\")",
+      "Bash(xargs -r kill)"
     ],
     "additionalDirectories": [
       "/home/daniel/development/perpl-squid",
