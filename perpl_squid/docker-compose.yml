@@ -1,3 +1,4 @@
+name: perpl-squid
 services:
   db:
     image: postgres:15

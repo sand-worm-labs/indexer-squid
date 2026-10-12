@@ -3,6 +3,10 @@
 [Subsquid](https://docs.sqd.ai) indexer for the Perpl Exchange on Monad mainnet (chain 143), proxy
 `0x34B6552d57a35a1D042CcAe1951BD1C370112a6F`. ABI: `abi/Exchange.json` (PerplFoundation/dex-sdk, contract revision `rc_v1.1.7-203-g0e5902dd`).
 
+sk_jdNv5je1t9wSxdFB6P3vnkO_8clYWNF3KMen8WvsA_0
+grpc_k2To9H6Mfixc0UoJ
+snap_YkUS86DFrQs8gnqq
+
 ## Data model (`schema.graphql`)
 
 | Entity | What it is |
