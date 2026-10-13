@@ -10,6 +10,9 @@ export const config = {
     corsOrigin: (process.env.CORS_ORIGIN ?? '*').split(',').map((s) => s.trim()),
     headPollMs: Number(process.env.HEAD_POLL_MS ?? 1000),
     schema,
+    dbMaxConcurrent: Number(process.env.DB_MAX_CONCURRENT ?? 6), // queries in flight at once (pool size is 10)
+    cnsDecimals: Number(process.env.CNS_DECIMALS ?? 6), // collateral token decimals (checked against fee/notional ratios)
+    summaryMinMs: Number(process.env.SUMMARY_MIN_MS ?? 2000), // never recompute the summary more often than this
     db: {
         host: process.env.DB_HOST ?? 'localhost',
         port: Number(process.env.DB_PORT ?? 5432),

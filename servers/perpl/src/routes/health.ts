@@ -1,11 +1,11 @@
 import type {FastifyInstance} from 'fastify'
-import {indexedHead, pool} from '../db.js'
+import {indexedHead, pool, queryStats} from '../db.js'
 import {hub} from '../hub.js'
 
 export default async function health(app: FastifyInstance) {
     app.get('/health', async () => {
         await pool.query('select 1')
-        return {ok: true, clients: hub.clients}
+        return {ok: true, clients: hub.clients, db: queryStats()}
     })
 
     // Latest block the indexer has committed.
