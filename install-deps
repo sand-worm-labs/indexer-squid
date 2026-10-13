@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Install what the squids need on a fresh Linux server: git, curl, rsync, python3, Docker (+compose), Node 22, pm2.
+# Works on apt (Debian/Ubuntu), dnf/yum (Fedora/RHEL/Rocky/Alma/Amazon), pacman (Arch), zypper (SUSE), apk (Alpine).
+#   sudo ./install-deps
+# Safe to re-run: anything already installed is skipped.
+set -euo pipefail
+[ "$(id -u)" = 0 ] || { echo "run as root: sudo ./install-deps" >&2; exit 1; }
+[ "$(uname -s)" = Linux ] || { echo "Linux only" >&2; exit 1; }
+
+NODE_MAJOR=22
+have() { command -v "$1" >/dev/null 2>&1; }
+
+if   have apt-get; then PM=apt;    pm_install() { DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"; }; apt-get update
+elif have dnf;     then PM=dnf;    pm_install() { dnf install -y "$@"; }
+elif have yum;     then PM=yum;    pm_install() { yum install -y "$@"; }
+elif have pacman;  then PM=pacman; pm_install() { pacman -Sy --noconfirm --needed "$@"; }
+elif have zypper;  then PM=zypper; pm_install() { zypper --non-interactive install "$@"; }
+elif have apk;     then PM=apk;    pm_install() { apk add --no-cache "$@"; }
+else echo "no supported package manager found" >&2; exit 1; fi
+echo "package manager: $PM"
+
+echo "== base tools"
+pm_install ca-certificates curl git rsync xz tar gzip python3 2>/dev/null || pm_install ca-certificates curl git rsync xz-utils tar gzip python3
+[ "$PM" = apk ] && pm_install bash coreutils
+
+echo "== docker"
+if ! have docker; then
+  case $PM in
+    pacman) pm_install docker docker-compose;;
+    apk)    pm_install docker docker-cli-compose;;
+    zypper) pm_install docker docker-compose;;
+    *)      curl -fsSL https://get.docker.com | sh;;   # official script: installs engine + compose plugin
+  esac
+fi
+if have systemctl; then systemctl enable --now docker; elif have rc-service; then rc-update add docker default; rc-service docker start; fi
+docker compose version >/dev/null 2>&1 || echo "warning: 'docker compose' plugin missing; install docker-compose-plugin for your distro"
+
+echo "== node $NODE_MAJOR"
+if ! have node || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
+  case $(uname -m) in x86_64) A=x64;; aarch64|arm64) A=arm64;; armv7l) A=armv7l;; *) echo "unsupported arch $(uname -m)" >&2; exit 1;; esac
+  # Alpine (musl) needs the unofficial musl build; everything else uses the official glibc tarball.
+  if [ "$PM" = apk ]; then pm_install nodejs npm
+  else
+    V=$(curl -fsSL "https://nodejs.org/dist/latest-v$NODE_MAJOR.x/SHASUMS256.txt" | grep -o "node-v[0-9.]*-linux-$A.tar.xz" | head -1)
+    [ -n "$V" ] || { echo "could not resolve node $NODE_MAJOR download" >&2; exit 1; }
+    curl -fsSL "https://nodejs.org/dist/latest-v$NODE_MAJOR.x/$V" | tar -xJ -C /usr/local --strip-components=1
+  fi
+fi
+
+echo "== pm2"
+have pm2 || npm install -g pm2
+
+echo; echo "installed:"; for c in git rsync python3 docker node npm pm2; do printf '  %-8s %s\n' "$c" "$($c --version 2>&1 | head -1)"; done
+echo "next: create ./.env, then ./squids db up && ./squids setup all && ./squids start all   (or: docker compose up -d --build squids)"
