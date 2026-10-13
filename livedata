@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Manage the live-data servers in ./servers (REST + WebSocket + SSE over a squid's schema), under pm2.
+#   ./livedata list                          every server, its schema, port, enabled flag and pm2 state
+#   ./livedata new <name> --schema <schema>  scaffold servers/<name> from servers/perpl
+#   ./livedata start|stop|restart <name|all>
+#   ./livedata logs|status|tunnel|url <name>
+# A server is any folder in ./servers with a server.conf (PORT, DB_SCHEMA). Its .env is generated on every start from
+# server.conf plus the repo-root .env (read-only login: SANDWORM_CLOUD_DB_READER_USER/PASSWORD, host/port/name).
+# ENABLED_SERVERS=a,b in the root .env sets what 'all' means (unset = every server). Naming a server always works.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVERS="$ROOT/servers"
+cd "$ROOT"
+
+die() { echo "error: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 not found. On a fresh server run: sudo ./install-deps"; }
+rootval() { [ -f .env ] && grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
+confval() { grep -E "^$2=" "$SERVERS/$1/server.conf" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
+
+ENABLED=$(rootval ENABLED_SERVERS)
+is_enabled() { [ -z "$ENABLED" ] || [[ ",${ENABLED// /}," == *",$1,"* ]]; }
+server_dirs() { for f in "$SERVERS"/*/server.conf; do [ -f "$f" ] && basename "$(dirname "$f")"; done; }
+
+resolve() { # <name|all> -> names
+  if [ "${1:-}" = all ]; then for n in $(server_dirs); do is_enabled "$n" && echo "$n"; done; return; fi
+  [ -n "${1:-}" ] || die "which server? (name or 'all')"
+  [ -f "$SERVERS/$1/server.conf" ] || die "'$1' is not a server (no servers/$1/server.conf). Try: ./livedata list"
+  echo "${1%/}"
+}
+
+pm2_state() { pm2 jlist 2>/dev/null | python3 -c "import sys,json;print(next((p['pm2_env']['status'] for p in json.load(sys.stdin) if p['name']=='$1'),'-'))" 2>/dev/null || echo -; }
+
+write_env() { # <name>: rebuild servers/<name>/.env
+  local n=$1 user pass
+  user=$(rootval SANDWORM_CLOUD_DB_READER_USER); pass=$(rootval SANDWORM_CLOUD_DB_READER_PASSWORD)
+  [ -n "$user" ] && [ -n "$pass" ] || die "set SANDWORM_CLOUD_DB_READER_USER and SANDWORM_CLOUD_DB_READER_PASSWORD in $ROOT/.env (servers only get a read-only login)"
+  {
+    cat "$SERVERS/$n/server.conf"
+    echo "HOST=0.0.0.0"; echo "CORS_ORIGIN=$(rootval CORS_ORIGIN || true)"; echo "HEAD_POLL_MS=1000"
+    echo "DB_HOST=$(rootval SANDWORM_CLOUD_DB_HOST)"; echo "DB_PORT=$(rootval SANDWORM_CLOUD_DB_PORT)"
+    echo "DB_NAME=$(rootval SANDWORM_CLOUD_DB_NAME)"; echo "DB_USER=$user"; echo "DB_PASS=$pass"
+  } | sed 's/^CORS_ORIGIN=$/CORS_ORIGIN=*/' > "$SERVERS/$n/.env"
+  chmod 600 "$SERVERS/$n/.env"
+}
+
+cmd_list() {
+  need pm2
+  printf '%-20s %-14s %-6s %-8s %s\n' SERVER SCHEMA PORT ENABLED PM2
+  for n in $(server_dirs); do
+    printf '%-20s %-14s %-6s %-8s %s\n' "$n" "$(confval "$n" DB_SCHEMA)" "$(confval "$n" PORT)" "$(is_enabled "$n" && echo yes || echo no)" "$(pm2_state "live-$n")"
+  done
+}
+
+cmd_new() {
+  local n=${1:-} schema=""; shift || true
+  [[ "$n" =~ ^[a-z][a-z0-9-]*$ ]] || die "usage: ./livedata new <name> --schema <schema>   (name: lowercase letters, digits, dashes)"
+  [ "${1:-}" = --schema ] && schema=${2:-}
+  [ -n "$schema" ] || die "usage: ./livedata new <name> --schema <schema>"
+  [[ "$schema" =~ ^[a-z_][a-z0-9_]*$ ]] || die "invalid schema '$schema'"
+  [ ! -e "$SERVERS/$n" ] || die "servers/$n already exists"
+  local max=4399 p; for d in $(server_dirs); do p=$(confval "$d" PORT); [[ "$p" =~ ^[0-9]+$ ]] && (( p > max )) && max=$p; done
+  mkdir "$SERVERS/$n"
+  (cd "$SERVERS/perpl" && tar cf - --exclude=node_modules --exclude=dist --exclude=.env --exclude=server.conf .) | (cd "$SERVERS/$n" && tar xf -)
+  printf '# Non-secret settings for this server. DB credentials come from the repo-root .env (the read-only login).\nPORT=%s\nDB_SCHEMA=%s\n' $((max + 1)) "$schema" > "$SERVERS/$n/server.conf"
+  sed -i "s/\"name\": \"[^\"]*\"/\"name\": \"$n-livedata-server\"/" "$SERVERS/$n/package.json"
+  echo "created servers/$n (port $((max + 1)), schema $schema). Edit its routes in servers/$n/src, then: ./livedata start $n"
+}
+
+cmd_start() {
+  need node; need npm; need pm2
+  local n; for n in $(resolve "${1:-}"); do
+    echo "== start $n"
+    write_env "$n"
+    (cd "$SERVERS/$n" && { npm ci --silent 2>/dev/null || npm install --silent; } && npm run build --silent)
+    pm2 delete "live-$n" >/dev/null 2>&1 || true
+    pm2 start "$SERVERS/$n/dist/server.js" --name "live-$n" --cwd "$SERVERS/$n" --update-env
+    sleep 2
+    curl -fsS -m 5 "http://localhost:$(confval "$n" PORT)/v1/head" && echo || echo "   (not answering yet: ./livedata logs $n)"
+  done
+  pm2 save >/dev/null
+}
+
+cmd_stop() { need pm2; local n; for n in $(resolve "${1:-}"); do echo "== stop $n"; pm2 stop "live-$n" "live-$n-tunnel" 2>/dev/null || true; done; }
+
+cmd_url() { pm2 logs "live-$1-tunnel" --lines 300 --nostream 2>/dev/null | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1; }
+
+cmd_tunnel() {
+  need pm2; need cloudflared
+  local n; n=$(resolve "${1:-}" | head -1)
+  pm2 delete "live-$n-tunnel" >/dev/null 2>&1 || true
+  pm2 start "$(command -v cloudflared)" --name "live-$n-tunnel" --interpreter none -- tunnel --no-autoupdate --url "http://localhost:$(confval "$n" PORT)"
+  pm2 save >/dev/null
+  echo "waiting for the tunnel URL..."
+  for _ in $(seq 1 20); do u=$(cmd_url "$n" || true); [ -n "$u" ] && { echo "$u"; return; }; sleep 1; done
+  echo "no URL yet: pm2 logs live-$n-tunnel"
+}
+
+c=${1:-help}; shift || true
+case $c in
+  list) cmd_list;; new) cmd_new "$@";;
+  start|restart) cmd_start "$@";; stop) cmd_stop "$@";;
+  logs) need pm2; n=$(resolve "${1:-}" | head -1); pm2 logs "live-$n" --lines 50;;
+  status) need pm2; n=$(resolve "${1:-}" | head -1); pm2 describe "live-$n" | head -20; curl -fsS -m 5 "http://localhost:$(confval "$n" PORT)/health" && echo || true;;
+  tunnel) cmd_tunnel "$@";; url) cmd_url "$(resolve "${1:-}" | head -1)";;
+  *) sed -n '2,10p' "$0";;
+esac

@@ -54,3 +54,15 @@ Don't run a squid both on the host and in Docker. Two processors on one schema c
 git clone https://github.com/sand-worm-labs/indexer-squid.git && cd indexer-squid
 # create ./.env, then either the squids script or docker compose, as above
 ```
+
+## Live data servers
+
+`servers/<name>/` are Fastify REST + WebSocket + SSE servers that read a squid's schema with the read-only login (`SANDWORM_CLOUD_DB_READER_USER/PASSWORD` in the root `.env`). Each has a `server.conf` (port, schema); its `.env` is generated on start. After a `git pull` on the server:
+
+```
+./livedata list                              # servers, ports, enabled flag, pm2 state
+./livedata start all                         # or a name; ENABLED_SERVERS=a,b in the root .env limits 'all'
+./livedata new <name> --schema <schema>      # scaffold another server (next free port from 4400)
+./livedata tunnel <name>                     # free public https URL via cloudflared (no domain needed)
+./livedata logs|status|stop|restart <name>
+```
