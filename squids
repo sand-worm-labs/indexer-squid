@@ -15,6 +15,8 @@ cd "$ROOT"
 
 die() { echo "error: $*" >&2; exit 1; }
 
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 not found. On a fresh server run: sudo ./install-deps"; }
+
 squid_dirs() { for f in */squid.yaml; do [ -f "$f" ] && dirname "$f"; done; }
 
 resolve() { # <name|all> -> list of dirs
@@ -186,6 +188,10 @@ cmd_status() {
 }
 
 c=${1:-help}; shift || true
+case $c in
+  setup|migrate|start|restart|db|status) need docker; need node;; esac
+case $c in
+  start|restart|stop|logs) need pm2;; esac
 case $c in
   list) cmd_list;; new) cmd_new "$@";; setup) cmd_setup "$@";;
   db) cmd_db "$@";; migrate) cmd_migrate "$@";;
