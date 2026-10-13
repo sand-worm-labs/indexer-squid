@@ -10,6 +10,10 @@ import {Cache, State} from './state'
 // ABI revision: rc_v1.1.7-203-g0e5902dd (see abi/Exchange.json).
 const EXCHANGE = '0x34B6552d57a35a1D042CcAe1951BD1C370112a6F'.toLowerCase()
 const START_BLOCK = Number(process.env.START_BLOCK ?? 0)
+// Optional: stop after this block (for test runs over a fixed range).
+const END_BLOCK = process.env.END_BLOCK ? Number(process.env.END_BLOCK) : undefined
+// Set BULK_WRITES=0 to send every write through the store again (see bulk.ts).
+const BULK_WRITES = process.env.BULK_WRITES !== '0'
 
 const dataSource = new DataSourceBuilder()
     .setPortal({
@@ -18,7 +22,7 @@ const dataSource = new DataSourceBuilder()
             headers: {'x-api-key': process.env.SQD_API_KEY ?? ''},
         },
     })
-    .setBlockRange({from: START_BLOCK})
+    .setBlockRange({from: START_BLOCK, to: END_BLOCK})
     .setFields({
         block: {timestamp: true},
         log: {transactionHash: true, topics: true, data: true},
@@ -36,7 +40,8 @@ const MAX_CACHED = 500_000
 
 run(dataSource, database, async (ctx) => {
     if (ctx.isHead) cache.clear()
-    const state = new State(ctx.store, cache)
+    // Bulk writes only while backfilling: at the head, blocks can still be reorged and the store must track every write.
+    const state = new State(ctx.store, cache, BULK_WRITES && !ctx.isHead)
     const t0 = Date.now()
     const blocks = ctx.blocks.map(augmentBlock)
     await state.prefetch(referenced(blocks.flatMap((b) => b.logs)))

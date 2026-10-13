@@ -1,5 +1,6 @@
 import {Store} from '@subsquid/typeorm-store'
 import {In} from 'typeorm'
+import {bulkWrite, finalizedManager} from './bulk'
 import {
     Account,
     CollateralTransfer,
@@ -81,7 +82,8 @@ export class State {
     private dirty = new Set<Market | Account | Position | Order | Funding>()
     private inserts: (Trade | PositionChange | CollateralTransfer)[] = []
 
-    constructor(private store: Store, cache: Cache = new Cache()) {
+    /** `bulk`: write the big tables around the store's query builder. Only for finalized blocks (see bulk.ts). */
+    constructor(private store: Store, cache: Cache = new Cache(), private bulk = false) {
         this.markets = cache.markets
         this.accounts = cache.accounts
         this.positions = cache.positions
@@ -269,15 +271,20 @@ export class State {
             await write()
             parts.push(`${name} ${rows.length}r/${Date.now() - t}ms`)
         }
+        // Finalized blocks only, and only if the store really has no change tracker; otherwise undefined -> normal path.
+        const em = this.bulk ? finalizedManager(this.store) : undefined
         // Parents first, so foreign keys resolve.
         for (const cls of [Market, Account, Position, Order, Funding] as const) {
             const rows = [...this.dirty].filter((e) => e instanceof cls)
-            await timed(cls.name.toLowerCase() + (cls === Order ? ` (${rows.filter((r) => this.freshOrders.has(r as Order)).length} new)` : ''), rows, () => this.store.upsert(rows as any[]))
+            const label = cls.name.toLowerCase() + (cls === Order ? ` (${rows.filter((r) => this.freshOrders.has(r as Order)).length} new)` : '')
+            // Only Order goes the bulk way: the other four are a few hundred rows and keep the store's exact semantics.
+            await timed(label, rows, () => (em && cls === Order ? bulkWrite(em, Order, rows as Order[], 'upsert') : this.store.upsert(rows as any[])))
         }
         for (const cls of [Trade, PositionChange, CollateralTransfer] as const) {
             const rows = this.inserts.filter((e) => e instanceof cls)
-            await timed(cls.name.toLowerCase(), rows, () => this.store.insert(rows as any[]))
+            await timed(cls.name.toLowerCase(), rows, () => (em ? bulkWrite(em, cls as any, rows, 'insert') : this.store.insert(rows as any[])))
         }
+        if (em) parts.unshift('bulk')
         this.flushStats = parts.join(', ')
     }
 }
