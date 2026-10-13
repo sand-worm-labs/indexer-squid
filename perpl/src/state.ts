@@ -103,7 +103,8 @@ export class State {
 
         // Open orders: one query per market, served by the partial index on (market_id, order_id) WHERE status = 'OPEN'.
         for (const [perpId, orderIds] of ids.orders) {
-            const wanted = [...orderIds].filter((id) => !this.openOrders.has(`${perpId}-${id}`))
+            // order_id is an int4 column; larger ids (client-generated ones in OrderRequest) can't be stored, so skip them.
+            const wanted = [...orderIds].filter((id) => id <= 2147483647 && !this.openOrders.has(`${perpId}-${id}`))
             if (!wanted.length) continue
             const open = await this.store.find(Order, {
                 where: {market: {id: perpId}, orderId: In(wanted), status: OrderStatus.OPEN},
