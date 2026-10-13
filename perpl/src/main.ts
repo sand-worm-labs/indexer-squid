@@ -31,6 +31,7 @@ const log = createLogger('sqd:processor')
 
 run(dataSource, database, async (ctx) => {
     const state = new State(ctx.store)
+    const t0 = Date.now()
     let count = 0
     for (const block of ctx.blocks.map(augmentBlock)) {
         for (const l of block.logs) {
@@ -47,8 +48,10 @@ run(dataSource, database, async (ctx) => {
             count++
         }
     }
+    const t1 = Date.now()
     await state.flush()
+    const t2 = Date.now()
     if (count > 0) {
-        log.info(`Processed ${count} events from block ${ctx.blocks.at(0)?.header.number} to ${ctx.blocks.at(-1)?.header.number}`)
+        log.info(`Processed ${count} events from block ${ctx.blocks.at(0)?.header.number} to ${ctx.blocks.at(-1)?.header.number} (handlers ${t1 - t0}ms, flush ${t2 - t1}ms)`)
     }
 })
