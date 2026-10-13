@@ -3,6 +3,7 @@
 #   ./livedata list                          every server, its schema, port, enabled flag and pm2 state
 #   ./livedata new <name> --schema <schema>  scaffold servers/<name> from servers/perpl
 #   ./livedata start|stop|restart <name|all>
+#   ./livedata caddy                         print a Caddyfile (HTTPS reverse proxy) for every enabled server that has a DOMAIN
 #   ./livedata logs|status|tunnel|url <name>
 # A server is any folder in ./servers with a server.conf (PORT, DB_SCHEMA). Its .env is generated on every start from
 # server.conf plus the repo-root .env (read-only login: SANDWORM_CLOUD_DB_READER_USER/PASSWORD, host/port/name).
@@ -96,12 +97,25 @@ cmd_tunnel() {
   echo "no URL yet: pm2 logs live-$n-tunnel"
 }
 
+# Caddy gets the certificates and terminates TLS; it proxies WebSocket and SSE (flush_interval -1) to each server.
+cmd_caddy() {
+  local n d found=0
+  for n in $(server_dirs); do
+    is_enabled "$n" || continue
+    d=$(confval "$n" DOMAIN); [ -n "$d" ] || continue
+    found=1
+    printf '%s {\n    encode zstd gzip\n    reverse_proxy localhost:%s {\n        flush_interval -1\n    }\n}\n\n' "$d" "$(confval "$n" PORT)"
+  done
+  [ "$found" = 1 ] || die "no enabled server has a DOMAIN in its server.conf"
+}
+
 c=${1:-help}; shift || true
 case $c in
   list) cmd_list;; new) cmd_new "$@";;
   start|restart) cmd_start "$@";; stop) cmd_stop "$@";;
   logs) need pm2; n=$(resolve "${1:-}" | head -1); pm2 logs "live-$n" --lines 50;;
   status) need pm2; n=$(resolve "${1:-}" | head -1); pm2 describe "live-$n" | head -20; curl -fsS -m 5 "http://localhost:$(confval "$n" PORT)/health" && echo || true;;
+  caddy) cmd_caddy;;
   tunnel) cmd_tunnel "$@";; url) cmd_url "$(resolve "${1:-}" | head -1)";;
   *) sed -n '2,10p' "$0";;
 esac

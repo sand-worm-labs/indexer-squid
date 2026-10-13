@@ -63,6 +63,16 @@ git clone https://github.com/sand-worm-labs/indexer-squid.git && cd indexer-squi
 ./livedata list                              # servers, ports, enabled flag, pm2 state
 ./livedata start all                         # or a name; ENABLED_SERVERS=a,b in the root .env limits 'all'
 ./livedata new <name> --schema <schema>      # scaffold another server (next free port from 4400)
-./livedata tunnel <name>                     # free public https URL via cloudflared (no domain needed)
+./livedata caddy                             # print a Caddyfile for every enabled server that has a DOMAIN in its server.conf
+./livedata tunnel <name>                     # temporary public URL via cloudflared (testing only)
 ./livedata logs|status|stop|restart <name>
 ```
+
+### Public HTTPS on a subdomain
+
+1. DNS: add an `A` record for the subdomain (for example `perpl-live.yourdomain.com`) pointing at the server's IP.
+2. Set `DOMAIN=perpl-live.yourdomain.com` in `servers/perpl/server.conf` and commit it.
+3. Install Caddy (https://caddyserver.com/docs/install) and open ports 80 and 443 in the firewall.
+4. `./livedata caddy | sudo tee /etc/caddy/Caddyfile && sudo systemctl reload caddy`
+
+Caddy fetches and renews the certificate itself and proxies REST, WebSocket (`wss://`) and SSE. Keep the servers' own ports (4400+) closed to the internet.
