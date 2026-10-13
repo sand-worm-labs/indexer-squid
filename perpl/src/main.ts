@@ -3,7 +3,7 @@ import {augmentBlock} from '@subsquid/evm-objects'
 import {DataSourceBuilder} from '@subsquid/evm-stream'
 import {createLogger} from '@subsquid/logger'
 import {TypeormDatabase} from '@subsquid/typeorm-store'
-import {handle, referenced, topics} from './handlers'
+import {handle, topics} from './handlers'
 import {Cache, State} from './state'
 
 // Perpl Exchange proxy on Monad mainnet (chain 143).
@@ -37,12 +37,8 @@ const MAX_CACHED = 500_000
 run(dataSource, database, async (ctx) => {
     if (ctx.isHead) cache.clear()
     const state = new State(ctx.store, cache)
-    const t0 = Date.now()
-    const blocks = ctx.blocks.map(augmentBlock)
-    await state.prefetch(referenced(blocks.flatMap((b) => b.logs)))
-    const t1 = Date.now()
     let count = 0
-    for (const block of blocks) {
+    for (const block of ctx.blocks.map(augmentBlock)) {
         for (const l of block.logs) {
             await handle(
                 state,
@@ -57,11 +53,9 @@ run(dataSource, database, async (ctx) => {
             count++
         }
     }
-    const t2 = Date.now()
     await state.flush()
-    const t3 = Date.now()
     if (ctx.isHead || cache.size > MAX_CACHED) cache.clear()
     if (count > 0) {
-        log.info(`Processed ${count} events from block ${ctx.blocks.at(0)?.header.number} to ${ctx.blocks.at(-1)?.header.number} (prefetch ${t1 - t0}ms, handlers ${t2 - t1}ms, flush ${t3 - t2}ms)`)
+        log.info(`Processed ${count} events from block ${ctx.blocks.at(0)?.header.number} to ${ctx.blocks.at(-1)?.header.number}`)
     }
 })

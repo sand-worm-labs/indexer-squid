@@ -24,40 +24,8 @@ type Handler = (s: State, m: Meta, log: Log) => Promise<void>
 
 const handlers = new Map<string, Handler>()
 
-const events = new Map<string, {event: AbiEvent<any>; name: string}>()
-const eventNames = new Map<string, string>(
-    Object.entries(ev).flatMap(([name, e]) => ((e as any)?.topic ? [[(e as any).topic as string, name] as [string, string]] : []))
-)
-// Each log is decoded once; prefetch() and the handler share the result.
-const decoded = new WeakMap<object, any>()
-const decode = (event: AbiEvent<any>, log: Log) => {
-    let e = decoded.get(log)
-    if (!e) decoded.set(log, (e = event.decode(log)))
-    return e
-}
-
 function on<E extends AbiEvent<any>>(event: E, fn: (s: State, m: Meta, e: EventParams<E>) => Promise<void> | void) {
-    events.set(event.topic, {event, name: eventNames.get(event.topic) ?? ''})
-    handlers.set(event.topic, async (s, m, log) => fn(s, m, decode(event, log) as EventParams<E>))
-}
-
-/** Ids of the markets, accounts and positions the logs will touch, so State.prefetch can load them in bulk. */
-export function referenced(logs: Log[]) {
-    const perps = new Set<string>()
-    const accounts = new Set<string>()
-    const positions = new Set<string>()
-    for (const log of logs) {
-        const known = events.get(log.topics[0])
-        if (!known) continue
-        const e = decode(known.event, log)
-        const accountId = e.accountId ?? e.posAccountId
-        if (e.perpId !== undefined) perps.add(String(e.perpId))
-        if (accountId !== undefined) accounts.add(String(accountId))
-        if (e.perpId !== undefined && accountId !== undefined && (known.name.startsWith('Position') || known.name === 'IncreasePositionCollateral')) {
-            positions.add(`${e.perpId}-${accountId}`)
-        }
-    }
-    return {perps: [...perps], accounts: [...accounts], positions: [...positions]}
+    handlers.set(event.topic, async (s, m, log) => fn(s, m, event.decode(log) as EventParams<E>))
 }
 
 export const topics = () => [...handlers.keys()]
