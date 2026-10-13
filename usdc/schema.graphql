@@ -1,0 +1,17 @@
+type Transfer @entity {
+  id: ID!
+  block: Int! @index
+  blockTime: DateTime!
+  txHash: String!
+  from: String! @index
+  to: String! @index
+  value: BigInt!
+}
+
+type Holder @entity {
+  "address"
+  id: ID!
+  balance: BigInt!
+  transfersIn: Int!
+  transfersOut: Int!
+}
