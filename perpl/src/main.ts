@@ -26,7 +26,7 @@ const dataSource = new DataSourceBuilder()
     .addLog({where: {address: [EXCHANGE], topic0: topics()}})
     .build()
 
-const database = new TypeormDatabase({supportHotBlocks: true})
+const database = new TypeormDatabase({supportHotBlocks: true, stateSchema: process.env.DB_SCHEMA})
 const log = createLogger('sqd:processor')
 
 run(dataSource, database, async (ctx) => {
