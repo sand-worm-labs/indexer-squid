@@ -1,0 +1,16 @@
+manifestVersion: subsquid.io/v0.1
+name: paj_cash
+version: 1
+description: 'paj_cash squid'
+build:
+deploy:
+  addons:
+    postgres:
+  processor:
+    cmd:
+      - sqd
+      - process:prod
+  api:
+    cmd:
+      - sqd
+      - serve:prod

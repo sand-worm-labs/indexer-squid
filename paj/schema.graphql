@@ -1,0 +1,6 @@
+# Define your entities here, then run `sqd codegen` and `sqd migration:generate`.
+type Example @entity {
+  id: ID!
+  block: Int! @index
+  txHash: String!
+}
