@@ -1,4 +1,5 @@
 import {Store} from '@subsquid/typeorm-store'
+import {In} from 'typeorm'
 import {
     Account,
     CollateralTransfer,
@@ -85,6 +86,21 @@ export class State {
         this.accounts = cache.accounts
         this.positions = cache.positions
         this.openOrders = cache.openOrders
+    }
+
+    /** Loads, in one query per type, the entities a batch is going to need that aren't cached yet. */
+    async prefetch(ids: {perps: string[]; accounts: string[]; positions: string[]}) {
+        const [markets, accounts, positions] = await Promise.all([
+            this.store.find(Market, {where: {id: In(ids.perps.filter((id) => !this.markets.has(id)))}}),
+            this.store.find(Account, {where: {id: In(ids.accounts.filter((id) => !this.accounts.has(id)))}}),
+            this.store.find(Position, {
+                where: {id: In(ids.positions.filter((id) => !this.positions.has(id)))},
+                relations: {market: true, account: true},
+            }),
+        ])
+        for (const x of markets) this.markets.set(x.id, x)
+        for (const x of accounts) this.accounts.set(x.id, x)
+        for (const x of positions) this.positions.set(x.id, x)
     }
 
     async market(perpId: bigint, m: Meta): Promise<Market> {
