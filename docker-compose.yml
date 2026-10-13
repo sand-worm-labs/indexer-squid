@@ -4,6 +4,19 @@ services:
   db:
     image: postgres:15
     restart: unless-stopped
+    # Tuned for bulk indexing. synchronous_commit=off can lose the last few commits on a crash; squids just reprocess them.
+    command:
+      - postgres
+      - -c
+      - synchronous_commit=off
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - max_wal_size=8GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - wal_compression=on
     environment:
       POSTGRES_USER: ${SANDWORM_CLOUD_DB_USER:?set SANDWORM_CLOUD_DB_USER in ./.env}
       POSTGRES_PASSWORD: ${SANDWORM_CLOUD_DB_PASSWORD:?set SANDWORM_CLOUD_DB_PASSWORD in ./.env}
