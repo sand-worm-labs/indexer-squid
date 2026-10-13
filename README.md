@@ -2,12 +2,6 @@
 
 [Subsquid](https://docs.sqd.dev) indexers for Sandworm. Every top-level folder with a `squid.yaml` is a squid. All squids share one Postgres, with one database and one schema per squid.
 
-| Squid | Chain | What it indexes |
-|-------|-------|-----------------|
-| `perpl` | Monad | Perpl Exchange (orders, trades, positions, funding, collateral) |
-| `usdc` | Monad | ERC20 transfers and holders |
-| `paj` | Solana | PAJ program instructions (set `PROGRAM_ID`; handlers are still a stub) |
-
 `.template/` is the scaffold used by `./squids new`.
 
 ## Configuration
