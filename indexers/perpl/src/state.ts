@@ -216,7 +216,11 @@ export class State {
         return order ?? undefined
     }
 
+    // Orders created in this batch (a plain insert); every other dirty order is an update of a row loaded from the DB.
+    private freshOrders = new Set<Order>()
+
     addOpenOrder(order: Order) {
+        this.freshOrders.add(order)
         this.openOrders.set(`${order.market.id}-${order.orderId}`, order)
         this.dirty.add(order)
     }
@@ -268,7 +272,7 @@ export class State {
         // Parents first, so foreign keys resolve.
         for (const cls of [Market, Account, Position, Order, Funding] as const) {
             const rows = [...this.dirty].filter((e) => e instanceof cls)
-            await timed(cls.name.toLowerCase(), rows, () => this.store.upsert(rows as any[]))
+            await timed(cls.name.toLowerCase() + (cls === Order ? ` (${rows.filter((r) => this.freshOrders.has(r as Order)).length} new)` : ''), rows, () => this.store.upsert(rows as any[]))
         }
         for (const cls of [Trade, PositionChange, CollateralTransfer] as const) {
             const rows = this.inserts.filter((e) => e instanceof cls)

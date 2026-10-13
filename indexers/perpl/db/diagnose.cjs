@@ -32,6 +32,12 @@ const mb = (n) => (Number(n) / 1048576).toFixed(0) + ' MB'
     from pg_indexes where schemaname = $1 and tablename in ('trade','position_change','collateral_transfer','order','position','account')
     order by tablename, size desc`, [schema])) console.log(`  ${r.tablename.padEnd(20)} ${r.indexname.padEnd(46)} ${mb(r.size)}`)
 
+  // 3b. did the backfill changes land? foreign keys left, and any index a cancelled CREATE INDEX CONCURRENTLY left invalid
+  const [fk] = await q(`select count(*) n from pg_constraint c join pg_namespace n on n.oid = c.connamespace where c.contype = 'f' and n.nspname = $1 and c.conrelid::regclass::text !~ '(hot_|status|migrations)'`, [schema])
+  console.log(`\n[3b] foreign keys on our tables: ${fk.n} (12 normally; 0 after backfill-fks.cjs drop)`)
+  const bad = await q(`select c.relname from pg_index i join pg_class c on c.oid = i.indexrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = $1 and not i.indisvalid`, [schema])
+  console.log(bad.length ? `     INVALID indexes (drop them and rerun the script): ${bad.map((r) => r.relname).join(', ')}` : '     no invalid indexes')
+
   // 4. settings that govern write speed
   console.log('\n[4] settings')
   for (const r of await q(`select name, setting, unit from pg_settings where name in ('synchronous_commit','shared_buffers','max_wal_size','checkpoint_timeout','wal_compression','fsync','full_page_writes','work_mem','max_connections')`)) console.log(`  ${r.name.padEnd(22)} ${r.setting}${r.unit || ''}`)
