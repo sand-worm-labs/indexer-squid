@@ -62,6 +62,6 @@ run(dataSource, database, async (ctx) => {
     const t2 = Date.now()
     if (ctx.isHead || cache.size > MAX_CACHED) cache.clear()
     if (count > 0) {
-        log.info(`Processed ${count} events from block ${ctx.blocks.at(0)?.header.number} to ${ctx.blocks.at(-1)?.header.number} (prefetch ${tp - t0}ms, handlers ${t1 - tp}ms, flush ${t2 - t1}ms)`)
+        log.info(`Processed ${count} events from block ${ctx.blocks.at(0)?.header.number} to ${ctx.blocks.at(-1)?.header.number} (prefetch ${tp - t0}ms, handlers ${t1 - tp}ms, flush ${t2 - t1}ms: ${state.flushStats})`)
     }
 })

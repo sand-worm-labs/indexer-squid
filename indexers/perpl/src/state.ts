@@ -254,15 +254,26 @@ export class State {
         this.inserts.push(entity)
     }
 
+    /** Rows written and ms spent per table by the last flush(), for the batch log line. */
+    flushStats = ''
+
     async flush() {
+        const parts: string[] = []
+        const timed = async (name: string, rows: unknown[], write: () => Promise<unknown>) => {
+            if (!rows.length) return
+            const t = Date.now()
+            await write()
+            parts.push(`${name} ${rows.length}r/${Date.now() - t}ms`)
+        }
         // Parents first, so foreign keys resolve.
         for (const cls of [Market, Account, Position, Order, Funding] as const) {
             const rows = [...this.dirty].filter((e) => e instanceof cls)
-            if (rows.length) await this.store.upsert(rows as any[])
+            await timed(cls.name.toLowerCase(), rows, () => this.store.upsert(rows as any[]))
         }
         for (const cls of [Trade, PositionChange, CollateralTransfer] as const) {
             const rows = this.inserts.filter((e) => e instanceof cls)
-            if (rows.length) await this.store.insert(rows as any[])
+            await timed(cls.name.toLowerCase(), rows, () => this.store.insert(rows as any[]))
         }
+        this.flushStats = parts.join(', ')
     }
 }
