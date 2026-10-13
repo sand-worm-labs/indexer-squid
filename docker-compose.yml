@@ -1,0 +1,32 @@
+# One Postgres shared by every squid. Each squid gets its own database (see ./squids).
+name: squids
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SANDWORM_CLOUD_DB_USER:?set SANDWORM_CLOUD_DB_USER in ./.env}
+      POSTGRES_PASSWORD: ${SANDWORM_CLOUD_DB_PASSWORD:?set SANDWORM_CLOUD_DB_PASSWORD in ./.env}
+      POSTGRES_DB: ${SANDWORM_CLOUD_DB_NAME:-sandworm_cloud_db}
+    ports:
+      - "127.0.0.1:${SANDWORM_CLOUD_DB_PORT:-23798}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    shm_size: 1gb
+  ui:
+    image: adminer:4
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${SANDWORM_CLOUD_UI_PORT:-8080}:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+volumes:
+  pgdata:

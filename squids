@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# Manage the squids in this repo. A squid is any top-level folder that contains squid.yaml.
+#   ./squids list
+#   ./squids new <name> [--chain monad-mainnet]   scaffold a new squid
+#   ./squids db up|down|ui|readonly|psql                      the ONE shared Postgres (one database, one schema per squid)
+#   ./squids setup  <name|all>                    install deps, create .env + database, migrate
+#   ./squids migrate|start|stop|restart|logs|status <name|all>
+# Shared settings live in ./.env (gitignored): SQD_API_KEY and SANDWORM_CLOUD_DB_{HOST,PORT,NAME,USER,PASSWORD},
+# ENABLED_SQUIDS=a,b   which squids 'all' means (unset = every squid). Naming a squid explicitly always works.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE="$ROOT/.template"
+cd "$ROOT"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+squid_dirs() { for f in */squid.yaml; do [ -f "$f" ] && dirname "$f"; done; }
+
+resolve() { # <name|all> -> list of dirs
+  if [ "${1:-}" = all ]; then for d in $(squid_dirs); do is_enabled "$d" && echo "$d"; done; return; fi
+  [ -n "${1:-}" ] || die "which squid? (name or 'all')"
+  [ -f "$1/squid.yaml" ] || die "'$1' is not a squid (no $1/squid.yaml). Try: ./squids list"
+  echo "${1%/}"
+}
+
+envval() { # <dir> <KEY>
+  [ -f "$1/.env" ] && grep -E "^$2=" "$1/.env" | tail -1 | cut -d= -f2- || true
+}
+
+next_port() { # <KEY> <start>
+  local max=$(( $2 - 1 )) v d
+  for d in $(squid_dirs); do
+    v=$(envval "$d" "$1"); [[ "$v" =~ ^[0-9]+$ ]] && (( v > max )) && max=$v
+  done
+  echo $(( max + 1 ))
+}
+
+rootval() { [ -f .env ] && grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
+DB_HOST_ROOT=$(rootval SANDWORM_CLOUD_DB_HOST); DB_HOST_ROOT=${DB_HOST_ROOT:-localhost}
+DB_PORT=$(rootval SANDWORM_CLOUD_DB_PORT); DB_PORT=${DB_PORT:-23798}
+export SANDWORM_CLOUD_DB_PORT=$DB_PORT
+ROOT_USER=$(rootval SANDWORM_CLOUD_DB_USER)
+ROOT_PASS=$(rootval SANDWORM_CLOUD_DB_PASSWORD)
+[ -n "$ROOT_USER" ] && [ -n "$ROOT_PASS" ] || die "set SANDWORM_CLOUD_DB_USER and SANDWORM_CLOUD_DB_PASSWORD in $ROOT/.env"
+ENABLED=$( { [ -f .env ] && grep -E '^ENABLED_SQUIDS=' .env | tail -1 | cut -d= -f2; } || true )
+is_enabled() { [ -z "$ENABLED" ] || [[ ",${ENABLED// /}," == *",$1,"* ]]; }
+ROOT_DB=$(rootval SANDWORM_CLOUD_DB_NAME); ROOT_DB=${ROOT_DB:-sandworm_cloud_db}
+dbc() { docker compose -f "$ROOT/docker-compose.yml" "$@"; }
+psql_db() { local db=$1; shift; dbc exec -T db psql -U "$ROOT_USER" -d "$db" -tA "$@"; }
+run_in() { local d=$1; shift; (cd "$d" && set -a && . ./.env && set +a && "$@"); }
+
+cmd_list() {
+  printf '%-20s %-14s %-8s %-8s %s\n' SQUID SCHEMA GQL_PORT ENABLED PM2
+  for d in $(squid_dirs); do
+    st=$(pm2 jlist 2>/dev/null | python3 -c "import sys,json;print(next((p['pm2_env']['status'] for p in json.load(sys.stdin) if p['name']=='$d'),'-'))" 2>/dev/null || echo -)
+    printf '%-20s %-14s %-8s %-8s %s\n' "$d" "$(envval "$d" DB_SCHEMA)" "$(envval "$d" GQL_PORT)" "$(is_enabled "$d" && echo yes || echo no)" "$st"
+  done
+}
+
+cmd_new() {
+  local name=${1:-}; shift || true
+  [ -n "$name" ] || die "usage: ./squids new <name> [--chain <portal-dataset>]"
+  [[ "$name" =~ ^[a-z0-9_]+$ ]] || die "name must be lowercase letters, digits, underscore"
+  [ ! -e "$name" ] || die "$name already exists"
+  local chain=monad-mainnet
+  while [ $# -gt 0 ]; do case $1 in --chain) chain=$2; shift 2;; *) die "unknown option $1";; esac; done
+
+  mkdir -p "$name"/{abi,src,db}
+  cp "$TEMPLATE"/{package.json,tsconfig.json,commands.json,.gitignore,.dockerignore,.squidignore,.env.example} "$name"/
+  sed "s/{{NAME}}/$name/g" "$TEMPLATE/squid.yaml" > "$name/squid.yaml"
+  sed "s/{{CHAIN}}/$chain/g" "$TEMPLATE/main.ts" > "$name/src/main.ts"
+  sed -i "s/\"name\": \"[^\"]*\"/\"name\": \"$name\"/" "$name/package.json"
+  cp "$TEMPLATE/schema.graphql" "$name/schema.graphql"
+  echo "created $name/ (chain dataset: $chain)"
+  echo "next: put the ABI in $name/abi/, edit $name/schema.graphql and $name/src/main.ts, then ./squids setup $name"
+}
+
+cmd_setup() {
+  local d; for d in $(resolve "${1:-}"); do
+    echo "== setup $d"
+    [ -d "$d/node_modules" ] || (cd "$d" && npm install --no-audit --no-fund)
+    if [ ! -f "$d/.env" ]; then
+      {
+        echo "DB_NAME=$ROOT_DB"
+        echo "DB_SCHEMA=$d"
+        echo "DB_HOST=$DB_HOST_ROOT"
+        echo "DB_USER=$ROOT_USER"
+        echo "DB_PASS=$ROOT_PASS"
+        echo "DB_PORT=$DB_PORT"
+        echo "GQL_PORT=$(next_port GQL_PORT 4350)"
+        echo "START_BLOCK=0"
+        echo "CONTRACT_ADDRESS="
+        if [ -f .env ] && grep -q '^SQD_API_KEY=' .env; then grep '^SQD_API_KEY=' .env; else echo "SQD_API_KEY=your_api_key_here"; fi
+      } > "$d/.env"
+      echo "   wrote $d/.env"
+    fi
+    cmd_migrate "$d"
+  done
+}
+
+cmd_db() {
+  case ${1:-} in
+    up)   dbc up -d --wait;;
+    down) dbc down;;
+    readonly) cmd_readonly;;
+    ui)   dbc up -d --wait ui >/dev/null
+          echo "Adminer: http://localhost:${SANDWORM_CLOUD_UI_PORT:-8080}/"
+          echo "  System: PostgreSQL   Server: db   Username: $ROOT_USER   Database: $ROOT_DB"
+          echo "  Password: SANDWORM_CLOUD_DB_PASSWORD in $ROOT/.env";;
+    psql) shift; dbc exec db psql -U "$ROOT_USER" -d "$ROOT_DB" "$@";;
+    *)    die "usage: ./squids db up|down|ui|readonly|psql [args]";;
+  esac
+}
+# Internal squid tables: never granted to anyone but the owner.
+INTERNAL_TABLES="migrations status hot_block hot_change_log template_registry"
+
+# Read-only login for Sandworm: SELECT on data tables only; nobody else may connect.
+cmd_readonly() {
+  local ru rp d sc t sql; ru=$(rootval SANDWORM_CLOUD_DB_READER_USER); rp=$(rootval SANDWORM_CLOUD_DB_READER_PASSWORD)
+  [ -n "$ru" ] && [ -n "$rp" ] || die "set SANDWORM_CLOUD_DB_READER_USER and _PASSWORD in $ROOT/.env"
+  cmd_db up
+  sql="revoke connect on database \"$ROOT_DB\" from public;
+       grant connect on database \"$ROOT_DB\" to \"$ROOT_USER\";
+       do \$\$ begin
+         if exists (select 1 from pg_roles where rolname='$ru') then alter role \"$ru\" login password '$rp';
+         else create role \"$ru\" login password '$rp'; end if; end \$\$;
+       grant connect on database \"$ROOT_DB\" to \"$ru\";
+       alter role \"$ru\" set default_transaction_read_only = on;"
+  for d in $(squid_dirs); do
+    sc=$(envval "$d" DB_SCHEMA)
+    [ "$(psql_db "$ROOT_DB" -c "select 1 from pg_namespace where nspname='$sc'")" = 1 ] || continue
+    sql="$sql revoke all on schema \"$sc\" from public; revoke all on all tables in schema \"$sc\" from public;
+         revoke all on all tables in schema \"$sc\" from \"$ru\"; grant usage on schema \"$sc\" to \"$ru\";"
+    for t in $(psql_db "$ROOT_DB" -c "select tablename from pg_tables where schemaname='$sc'"); do
+      [[ " $INTERNAL_TABLES " == *" $t "* ]] && continue
+      sql="$sql grant select on \"$sc\".\"$t\" to \"$ru\";"
+    done
+  done
+  psql_db "$ROOT_DB" -c "$sql" >/dev/null && echo "readonly login '$ru' ready (data tables only; internal tables hidden)"
+}
+ensure_schema() { # each squid lives in its own schema of the shared database
+  local sc; sc=$(envval "$1" DB_SCHEMA); [ -n "$sc" ] || die "$1/.env has no DB_SCHEMA"
+  psql_db "$ROOT_DB" -c "create schema if not exists \"$sc\"" >/dev/null
+}
+
+cmd_migrate() {
+  local d; for d in $(resolve "${1:-}"); do
+    echo "== migrate $d"; cmd_db up; ensure_schema "$d"
+    [ -d "$d/src/model/generated" ] || { echo "   running codegen"; (cd "$d" && npx squid-typeorm-codegen); }
+    if [ -d "$d/abi" ] && ls "$d"/abi/*.json >/dev/null 2>&1 && [ ! -d "$d/src/abi" ]; then
+      echo "   running typegen"; (cd "$d" && npx squid-evm-typegen src/abi abi/*.json)
+    fi
+    (cd "$d" && npm run build --silent)
+    if ! ls "$d"/db/migrations/*.js >/dev/null 2>&1; then
+      echo "   no migrations yet, generating"; run_in "$d" npx squid-typeorm-migration generate
+    fi
+    run_in "$d" npx squid-typeorm-migration apply
+    cmd_readonly
+  done
+}
+
+cmd_start() {
+  local d; for d in $(resolve "${1:-}"); do
+    if grep -q CONTRACT_ADDRESS "$d/src/main.ts" && [ -z "$(envval "$d" CONTRACT_ADDRESS)" ]; then
+      echo "== skip $d: set CONTRACT_ADDRESS in $d/.env first"; continue
+    fi
+    echo "== start $d"
+    (cd "$d" && npm run build --silent)
+    pm2 delete "$d" >/dev/null 2>&1 || true
+    pm2 delete "$d-api" >/dev/null 2>&1 || true
+    run_in "$d" pm2 start lib/main.js --name "$d" --cwd "$ROOT/$d" --node-args="--require=dotenv/config" --update-env
+    run_in "$d" pm2 start npx --name "$d-api" --cwd "$ROOT/$d" --update-env -- squid-graphql-server
+  done
+  pm2 save >/dev/null
+}
+cmd_stop()    { local d; for d in $(resolve "${1:-}"); do echo "== stop $d"; pm2 stop "$d" "$d-api" 2>/dev/null || true; done; }
+cmd_restart() { cmd_stop "$@"; cmd_start "$@"; }
+cmd_logs()    { local d; d=$(resolve "${1:-}" | head -1); pm2 logs "$d" --lines 50; }
+cmd_status() {
+  local d sc; dbc ps --format 'table {{.Name}}	{{.Status}}' 2>/dev/null || true
+  for d in $(resolve "${1:-all}"); do
+    sc=$(envval "$d" DB_SCHEMA); echo "== $d (schema $sc)"
+    psql_db "$ROOT_DB" -c "select 'height: '||max(height) from \"$sc\".status" 2>/dev/null || echo "   (no processor status yet)"
+  done
+}
+
+c=${1:-help}; shift || true
+case $c in
+  list) cmd_list;; new) cmd_new "$@";; setup) cmd_setup "$@";;
+  db) cmd_db "$@";; migrate) cmd_migrate "$@";;
+  start) cmd_start "$@";; stop) cmd_stop "$@";; restart) cmd_restart "$@";;
+  logs) cmd_logs "$@";; status) cmd_status "$@";;
+  *) sed -n '2,8p' "$0";;
+esac
