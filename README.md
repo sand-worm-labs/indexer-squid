@@ -1,8 +1,16 @@
 # indexer-squid
 
-[Subsquid](https://docs.sqd.dev) indexers for Sandworm. Every top-level folder with a `squid.yaml` is a squid. All squids share one Postgres, with one database and one schema per squid.
+[Subsquid](https://docs.sqd.dev) indexers for Sandworm. Every folder in `indexers/` with a `squid.yaml` is a squid. All squids share one Postgres, with one database and one schema per squid.
 
-`.template/` is the scaffold used by `./squids new`.
+`indexers/.template/` is the scaffold used by `./squids new`.
+
+## Layout
+
+```
+indexers/    the squids (perpl, usdc, paj, .template)
+servers/     live-data servers (Fastify REST/WebSocket/SSE), one folder each
+squids       CLI for indexers/      livedata   CLI for servers/
+```
 
 ## Configuration
 

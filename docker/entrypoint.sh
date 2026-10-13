@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # For each enabled squid: create its schema, apply migrations, then run processor + GraphQL API under pm2-runtime.
-# Per-squid settings (START_BLOCK, CONTRACT_ADDRESS/WALLET_ADDRESS, SQD_API_KEY, ...) come from /app/<squid>/.env (mounted by compose);
+# Per-squid settings (START_BLOCK, CONTRACT_ADDRESS/WALLET_ADDRESS, SQD_API_KEY, ...) come from /app/indexers/<squid>/.env (mounted by compose);
 # DB host/port/user/password come from the root .env via the container environment.
 set -euo pipefail
-cd /app
+cd /app/indexers
 
 : "${SANDWORM_CLOUD_DB_USER:?}" "${SANDWORM_CLOUD_DB_PASSWORD:?}"
 export DB_NAME=${SANDWORM_CLOUD_DB_NAME:-sandworm_cloud_db}
@@ -36,10 +36,10 @@ done
 node -e '
 const apps=process.argv.slice(1).flatMap(a=>{
   const [d,gql]=a.split(":");
-  const env={...require(require.resolve("dotenv",{paths:["/app/"+d]})).config({path:`/app/${d}/.env`}).parsed,DB_NAME:process.env.DB_NAME,DB_SCHEMA:d,DB_HOST:"db",DB_PORT:"5432",
+  const env={...require(require.resolve("dotenv",{paths:["/app/indexers/"+d]})).config({path:`/app/indexers/${d}/.env`}).parsed,DB_NAME:process.env.DB_NAME,DB_SCHEMA:d,DB_HOST:"db",DB_PORT:"5432",
     DB_USER:process.env.SANDWORM_CLOUD_DB_USER,DB_PASS:process.env.SANDWORM_CLOUD_DB_PASSWORD,GQL_PORT:gql};
-  return [{name:d,cwd:`/app/${d}`,script:"lib/main.js",env},
-          {name:d+"-api",cwd:`/app/${d}`,script:"npx",args:"squid-graphql-server",env}];
+  return [{name:d,cwd:`/app/indexers/${d}`,script:"lib/main.js",env},
+          {name:d+"-api",cwd:`/app/indexers/${d}`,script:"npx",args:"squid-graphql-server",env}];
 });
 require("fs").writeFileSync("/tmp/ecosystem.config.json",JSON.stringify({apps}))' "${apps[@]}"
 exec pm2-runtime /tmp/ecosystem.config.json

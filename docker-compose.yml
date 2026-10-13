@@ -55,9 +55,9 @@ services:
       SANDWORM_CLOUD_DB_NAME: ${SANDWORM_CLOUD_DB_NAME:-sandworm_cloud_db}
       ENABLED_SQUIDS: ${ENABLED_SQUIDS:-}
     volumes:
-      - ./perpl/.env:/app/perpl/.env:ro
-      - ./usdc/.env:/app/usdc/.env:ro
-      - ./paj/.env:/app/paj/.env:ro
+      - ./indexers/perpl/.env:/app/indexers/perpl/.env:ro
+      - ./indexers/usdc/.env:/app/indexers/usdc/.env:ro
+      - ./indexers/paj/.env:/app/indexers/paj/.env:ro
     ports:
       - "127.0.0.1:4350-4355:4350-4355"
 volumes:

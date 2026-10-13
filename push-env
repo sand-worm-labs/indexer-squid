@@ -9,7 +9,7 @@ HOST=${1:-root@69.164.244.245}
 DIR=${2:-indexer-squid}
 
 files=(.env)
-for f in */squid.yaml; do [ -f "$(dirname "$f")/.env" ] && files+=("$(dirname "$f")/.env"); done
+for f in indexers/*/squid.yaml; do [ -f "$(dirname "$f")/.env" ] && files+=("$(dirname "$f")/.env"); done
 [ -f .env ] || { echo "error: no ./.env" >&2; exit 1; }
 
 echo "pushing to $HOST:$DIR"; printf '  %s\n' "${files[@]}"

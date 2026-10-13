@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Manage the squids in this repo. A squid is any top-level folder that contains squid.yaml.
+# Manage the squids in this repo. A squid is any folder in ./indexers that contains squid.yaml.
 #   ./squids list
 #   ./squids new <name> [--chain monad-mainnet]   scaffold a new squid
 #   ./squids db up|down|ui|readonly|psql                      the ONE shared Postgres (one database, one schema per squid)
@@ -10,8 +10,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATE="$ROOT/.template"
-cd "$ROOT"
+IND="$ROOT/indexers"
+TEMPLATE="$IND/.template"
+cd "$IND"
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -38,14 +39,14 @@ next_port() { # <KEY> <start>
   echo $(( max + 1 ))
 }
 
-rootval() { [ -f .env ] && grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
+rootval() { [ -f "$ROOT/.env" ] && grep -E "^$1=" "$ROOT/.env" | tail -1 | cut -d= -f2- || true; }
 DB_HOST_ROOT=$(rootval SANDWORM_CLOUD_DB_HOST); DB_HOST_ROOT=${DB_HOST_ROOT:-localhost}
 DB_PORT=$(rootval SANDWORM_CLOUD_DB_PORT); DB_PORT=${DB_PORT:-23798}
 export SANDWORM_CLOUD_DB_PORT=$DB_PORT
 ROOT_USER=$(rootval SANDWORM_CLOUD_DB_USER)
 ROOT_PASS=$(rootval SANDWORM_CLOUD_DB_PASSWORD)
 [ -n "$ROOT_USER" ] && [ -n "$ROOT_PASS" ] || die "set SANDWORM_CLOUD_DB_USER and SANDWORM_CLOUD_DB_PASSWORD in $ROOT/.env"
-ENABLED=$( { [ -f .env ] && grep -E '^ENABLED_SQUIDS=' .env | tail -1 | cut -d= -f2; } || true )
+ENABLED=$( { [ -f "$ROOT/.env" ] && grep -E '^ENABLED_SQUIDS=' "$ROOT/.env" | tail -1 | cut -d= -f2; } || true )
 is_enabled() { [ -z "$ENABLED" ] || [[ ",${ENABLED// /}," == *",$1,"* ]]; }
 ROOT_DB=$(rootval SANDWORM_CLOUD_DB_NAME); ROOT_DB=${ROOT_DB:-sandworm_cloud_db}
 dbc() { docker compose -f "$ROOT/docker-compose.yml" "$@"; }
@@ -93,7 +94,7 @@ cmd_setup() {
         echo "GQL_PORT=$(next_port GQL_PORT 4350)"
         echo "START_BLOCK=0"
         echo "CONTRACT_ADDRESS="
-        if [ -f .env ] && grep -q '^SQD_API_KEY=' .env; then grep '^SQD_API_KEY=' .env; else echo "SQD_API_KEY=your_api_key_here"; fi
+        if [ -f "$ROOT/.env" ] && grep -q '^SQD_API_KEY=' "$ROOT/.env"; then grep '^SQD_API_KEY=' "$ROOT/.env"; else echo "SQD_API_KEY=your_api_key_here"; fi
       } > "$d/.env"
       echo "   wrote $d/.env"
     fi
@@ -171,8 +172,8 @@ cmd_start() {
     (cd "$d" && npm run build --silent)
     pm2 delete "$d" >/dev/null 2>&1 || true
     pm2 delete "$d-api" >/dev/null 2>&1 || true
-    run_in "$d" pm2 start lib/main.js --name "$d" --cwd "$ROOT/$d" --node-args="--require=dotenv/config" --update-env
-    run_in "$d" pm2 start npx --name "$d-api" --cwd "$ROOT/$d" --update-env -- squid-graphql-server
+    run_in "$d" pm2 start lib/main.js --name "$d" --cwd "$IND/$d" --node-args="--require=dotenv/config" --update-env
+    run_in "$d" pm2 start npx --name "$d-api" --cwd "$IND/$d" --update-env -- squid-graphql-server
   done
   pm2 save >/dev/null
 }
