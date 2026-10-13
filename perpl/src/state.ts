@@ -90,14 +90,13 @@ export class State {
 
     /** Loads, in one query per type, the entities a batch is going to need that aren't cached yet. */
     async prefetch(ids: {perps: string[]; accounts: string[]; positions: string[]; orders: Map<string, Set<number>>}) {
-        const [markets, accounts, positions] = await Promise.all([
-            this.store.find(Market, {where: {id: In(ids.perps.filter((id) => !this.markets.has(id)))}}),
-            this.store.find(Account, {where: {id: In(ids.accounts.filter((id) => !this.accounts.has(id)))}}),
-            this.store.find(Position, {
-                where: {id: In(ids.positions.filter((id) => !this.positions.has(id)))},
-                relations: {market: true, account: true},
-            }),
-        ])
+        // Sequential: all of a batch's queries share one connection.
+        const markets = await this.store.find(Market, {where: {id: In(ids.perps.filter((id) => !this.markets.has(id)))}})
+        const accounts = await this.store.find(Account, {where: {id: In(ids.accounts.filter((id) => !this.accounts.has(id)))}})
+        const positions = await this.store.find(Position, {
+            where: {id: In(ids.positions.filter((id) => !this.positions.has(id)))},
+            relations: {market: true, account: true},
+        })
         for (const x of markets) this.markets.set(x.id, x)
         for (const x of accounts) this.accounts.set(x.id, x)
         for (const x of positions) this.positions.set(x.id, x)
