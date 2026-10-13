@@ -1,7 +1,9 @@
 // Index several block ranges at once, each in its own process and its own schema.
 //
 //   node db/range.cjs plan <N>                 suggest how to split the remaining blocks across N processes
-//   node db/range.cjs start <name> <from> [to]  new schema <main>_<name>, migrated, in backfill mode, pm2 app "<squid>-<name>"
+//   node db/range.cjs start <name> <from> <to> [--no-orders]
+//                                              new schema <main>_<name>, migrated, in backfill mode, pm2 app "<squid>-<name>".
+//                                              --no-orders: skip the order table (about twice as fast; trades/positions/balances unaffected)
 //   node db/range.cjs end <name|main> <to>      make a running range (or the main squid) stop at block <to>
 //   node db/range.cjs status                    progress, speed and time left for the main squid and every range
 //   node db/range.cjs stop <name>               stop a range's process (its data stays)
@@ -20,7 +22,9 @@ const DIR = path.join(__dirname, '..')
 const MAIN = process.env.DB_SCHEMA || 'perpl'
 const APP = path.basename(DIR) // pm2 name of the main processor
 const REG = `"${MAIN}".zz_ranges`
-const [cmd, ...args] = process.argv.slice(2)
+const [cmd, ...rawArgs] = process.argv.slice(2)
+const NO_ORDERS = rawArgs.includes('--no-orders')
+const args = rawArgs.filter((a) => !a.startsWith('--'))
 const die = (m) => { console.error('error: ' + m); process.exit(1) }
 const block = (v, what) => { const n = Number(v); if (v === undefined || !Number.isInteger(n) || n < 0) die(`${what} must be a block number`); return n }
 const nameOk = (n) => { if (!/^[a-z0-9]{1,20}$/.test(n || '')) die('name: lowercase letters and digits only, e.g. r2'); return n }
@@ -33,6 +37,7 @@ async function connect() {
   const c = new Client({host: process.env.DB_HOST, port: process.env.DB_PORT, user: process.env.DB_USER, password: process.env.DB_PASS, database: process.env.DB_NAME})
   await c.connect()
   await c.query(`create table if not exists ${REG} (name text primary key, from_block int not null, to_block int, created_at timestamptz default now())`)
+  await c.query(`alter table ${REG} add column if not exists no_orders boolean not null default false`)
   return c
 }
 const heightOf = async (c, schema) => { try { return Number((await c.query(`select height from "${schema}".status`)).rows[0]?.height ?? -1) } catch { return -1 } }
@@ -54,7 +59,8 @@ function pm2Start(name, env) {
   console.log(`pm2: ${appOf(name)} started (logs: pm2 logs ${appOf(name)})`)
 }
 const pm2Stop = (name) => { try { execFileSync('pm2', ['delete', appOf(name)], {stdio: 'ignore'}); execFileSync('pm2', ['save'], {stdio: 'ignore'}) } catch {} }
-const envFor = (schema, from, to) => ({DB_SCHEMA: schema, ...(from === undefined ? {} : {START_BLOCK: String(from)}), END_BLOCK: to == null ? '' : String(to)})
+// Ranges run in range mode (they record what they cannot resolve without earlier state); the main squid never does.
+const envFor = (schema, from, to, noOrders = false) => ({DB_SCHEMA: schema, ...(from === undefined ? {RANGE_MODE: '', SKIP_ORDERS: ''} : {START_BLOCK: String(from), RANGE_MODE: '1', SKIP_ORDERS: noOrders ? '1' : ''}), END_BLOCK: to == null ? '' : String(to)})
 
 const commands = {
   async plan() {
@@ -64,27 +70,29 @@ const commands = {
     console.log(`main squid is at block ${fmt(at)}, chain head ${fmt(head)}: ${fmt(head - at)} blocks left, ${fmt(per)} per process.\n`)
     console.log(`node db/range.cjs end main ${at + per}`)
     for (let i = 1; i < n; i++) {
-      const from = at + per * i + 1, to = i === n - 1 ? '' : at + per * (i + 1)
-      console.log(`node db/range.cjs start r${i + 1} ${from} ${to}`.trim())
+      const from = at + per * i + 1, to = i === n - 1 ? head : at + per * (i + 1)
+      console.log(`node db/range.cjs start r${i + 1} ${from} ${to}`)
     }
-    console.log(`\nThe last one has no end: it follows the chain head. Check progress with: node db/range.cjs status`)
+    console.log(`\nEvery range has a fixed end (the last one ends at today's head ${fmt(head)}): ranges only handle final blocks.\nAfter the merge the main squid catches up the rest and goes live. Progress: node db/range.cjs status`)
   },
 
   async start() {
     const name = nameOk(args[0]); if (name === 'main') die('"main" is the main squid: use "end main <to>"')
-    const from = block(args[1], 'from'), to = args[2] === undefined ? null : block(args[2], 'to')
+    const from = block(args[1], 'from'), to = block(args[2], 'to')
     if (to !== null && to < from) die('to is before from')
     const schema = schemaOf(name), c = await connect()
-    const known = (await c.query(`select from_block, to_block from ${REG} where name = $1`, [name])).rows[0]
+    const known = (await c.query(`select from_block, to_block, no_orders from ${REG} where name = $1`, [name])).rows[0]
     if (known) {
       console.log(`range ${name} already exists (${fmt(known.from_block)} to ${known.to_block ? fmt(known.to_block) : 'head'}): restarting its process`)
-      await c.end(); return pm2Start(name, envFor(schema, known.from_block, known.to_block))
+      await c.end(); return pm2Start(name, envFor(schema, known.from_block, known.to_block, known.no_orders))
     }
     await c.query(`create schema "${schema}"`)
     console.log(`schema ${schema}: applying migrations`)
     execFileSync('npx', ['squid-typeorm-migration', 'apply'], {cwd: DIR, env: {...process.env, DB_SCHEMA: schema}, stdio: 'ignore'})
     // Market config (names, decimals, fees) was set by events long before this range: carry it over.
     await c.query(`insert into "${schema}".market select * from "${MAIN}".market on conflict (id) do nothing`)
+    // Keep what was carried over, so the merge can tell which market fields this range itself changed.
+    await c.query(`create table "${schema}".zz_market_seed as select * from "${schema}".market`)
     // Backfill mode: no foreign keys, and only the indexes the processor itself needs.
     for (const r of (await c.query(`select c.conname, c.conrelid::regclass::text tbl from pg_constraint c join pg_namespace n on n.oid = c.connamespace
                                     where c.contype = 'f' and n.nspname = $1 and c.conrelid::regclass::text !~ '(hot_|status|migrations)'`, [schema])).rows) {
@@ -95,25 +103,25 @@ const commands = {
                                     and indexname not in (select c.conname from pg_constraint c join pg_namespace n on n.oid = c.connamespace where c.contype = 'p' and n.nspname = $1)`, [schema])).rows) {
       await c.query(`drop index "${schema}"."${r.indexname}"`)
     }
-    await c.query(`insert into ${REG} (name, from_block, to_block) values ($1, $2, $3)`, [name, from, to])
+    await c.query(`insert into ${REG} (name, from_block, to_block, no_orders) values ($1, $2, $3, $4)`, [name, from, to, NO_ORDERS])
     await c.end()
-    console.log(`range ${name}: blocks ${fmt(from)} to ${to === null ? 'the chain head' : fmt(to)}`)
-    pm2Start(name, envFor(schema, from, to))
+    console.log(`range ${name}: blocks ${fmt(from)} to ${fmt(to)}${NO_ORDERS ? ', without orders' : ''}`)
+    pm2Start(name, envFor(schema, from, to, NO_ORDERS))
   },
 
   async end() {
     const name = args[0] === 'main' ? 'main' : nameOk(args[0]), to = block(args[1], 'to')
     const c = await connect(), at = await heightOf(c, schemaOf(name))
     if (to < at) die(`${name} is already at block ${fmt(at)}, past ${fmt(to)}`)
-    let from
+    let from, noOrders = false
     if (name !== 'main') {
-      const r = (await c.query(`update ${REG} set to_block = $2 where name = $1 returning from_block`, [name, to])).rows[0]
+      const r = (await c.query(`update ${REG} set to_block = $2 where name = $1 returning from_block, no_orders`, [name, to])).rows[0]
       if (!r) die(`no range called ${name}`)
-      from = r.from_block
+      from = r.from_block; noOrders = r.no_orders
     }
     await c.end()
     console.log(`${name}: will stop at block ${fmt(to)} (now at ${fmt(at)}, ${fmt(to - at)} to go)`)
-    pm2Start(name, envFor(schemaOf(name), from, to))
+    pm2Start(name, envFor(schemaOf(name), from, to, noOrders))
   },
 
   async status() {

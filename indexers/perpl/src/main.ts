@@ -14,6 +14,10 @@ const START_BLOCK = Number(process.env.START_BLOCK ?? 0)
 const END_BLOCK = process.env.END_BLOCK ? Number(process.env.END_BLOCK) : undefined
 // Set BULK_WRITES=0 to send every write through the store again (see bulk.ts).
 const BULK_WRITES = process.env.BULK_WRITES !== '0'
+// Set by db/range.cjs for a processor that starts mid-chain in its own schema (see State).
+const RANGE_MODE = process.env.RANGE_MODE === '1'
+// Do not track orders at all (see State). Set by db/range.cjs start --no-orders.
+const SKIP_ORDERS = process.env.SKIP_ORDERS === '1'
 
 const dataSource = new DataSourceBuilder()
     .setPortal({
@@ -41,7 +45,7 @@ const MAX_CACHED = 500_000
 run(dataSource, database, async (ctx) => {
     if (ctx.isHead) cache.clear()
     // Bulk writes only while backfilling: at the head, blocks can still be reorged and the store must track every write.
-    const state = new State(ctx.store, cache, BULK_WRITES && !ctx.isHead)
+    const state = new State(ctx.store, cache, BULK_WRITES && !ctx.isHead, RANGE_MODE, SKIP_ORDERS)
     const t0 = Date.now()
     const blocks = ctx.blocks.map(augmentBlock)
     await state.prefetch(referenced(blocks.flatMap((b) => b.logs)))

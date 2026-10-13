@@ -274,7 +274,7 @@ on(ev.OrderChanged, async (s, m, e) => {
         order.expiryBlock = e.expiryBlock
         order.updatedBlock = m.block
         order.updatedAt = m.time
-    }
+    } else s.orphan('CHANGE', c.perpId, e.orderId, m, {price: e.pricePNS, lot: e.lotLNS, expiry: e.expiryBlock})
     await s.setBalance(c.accountId, e.balanceCNS, m)
 })
 
@@ -283,12 +283,14 @@ on(ev.OrderCancelled, async (s, m, e) => {
     if (!c) return
     const order = await s.openOrder(c.perpId, c.orderId)
     if (order) s.closeOrder(order, OrderStatus.CANCELLED, m)
+    else s.orphan('CANCEL', c.perpId, c.orderId, m)
     await s.setBalance(c.accountId, e.balanceCNS, m)
 })
 
 async function clearOrder(s: State, m: Meta, perpId: bigint, orderId: bigint, reason: string) {
     const order = await s.openOrder(perpId, orderId)
     if (order) s.closeOrder(order, OrderStatus.CLEARED, m, reason)
+    else s.orphan('CLEAR', perpId, orderId, m, {reason})
 }
 
 on(ev.OrderCancelledByAdmin, (s, m, e) => clearOrder(s, m, e.perpId, e.orderId, 'CANCELLED_BY_ADMIN'))
@@ -315,7 +317,7 @@ async function makerFill(
         order.updatedBlock = m.block
         order.updatedAt = m.time
         if (order.lotLNS === 0n) s.closeOrder(order, OrderStatus.FILLED, m)
-    }
+    } else s.orphan('FILL', e.perpId, e.orderId, m, {lot: e.lotLNS})
     s.insert(
         new Trade({
             id: tradeId(m),

@@ -41,6 +41,8 @@ export interface OrderContext {
     leverageHdths: bigint
 }
 
+let orphanTableReady = false
+
 export const positionType = (n: number) => (n === 0 ? PositionType.LONG : PositionType.SHORT)
 
 /**
@@ -82,8 +84,15 @@ export class State {
     private dirty = new Set<Market | Account | Position | Order | Funding>()
     private inserts: (Trade | PositionChange | CollateralTransfer)[] = []
 
-    /** `bulk`: write the big tables around the store's query builder. Only for finalized blocks (see bulk.ts). */
-    constructor(private store: Store, cache: Cache = new Cache(), private bulk = false) {
+    /**
+     * `bulk`: write the big tables around the store's query builder. Only for finalized blocks (see bulk.ts).
+     * `rangeMode`: this processor started mid-chain with no earlier state (db/range.cjs). It then records what it cannot
+     * resolve itself, so the merge step can: an account whose balance no event has set yet is -1 ("unknown", not zero),
+     * and events for orders it has never seen go to zz_orphan_order_event instead of being dropped.
+     * `skipOrders`: do not track orders at all (no order rows, no lookups). Trades, positions and balances are unaffected;
+     * trades just carry no order link. For quick partial datasets where the order table is not needed.
+     */
+    constructor(private store: Store, cache: Cache = new Cache(), private bulk = false, private rangeMode = false, private skipOrders = false) {
         this.markets = cache.markets
         this.accounts = cache.accounts
         this.positions = cache.positions
@@ -104,7 +113,7 @@ export class State {
         for (const x of positions) this.positions.set(x.id, x)
 
         // Open orders: one query per market, served by the partial index on (market_id, order_id) WHERE status = 'OPEN'.
-        for (const [perpId, orderIds] of ids.orders) {
+        for (const [perpId, orderIds] of this.skipOrders ? [] : ids.orders) {
             // order_id is an int4 column; larger ids (client-generated ones in OrderRequest) can't be stored, so skip them.
             const wanted = [...orderIds].filter((id) => id <= 2147483647 && !this.openOrders.has(`${perpId}-${id}`))
             if (!wanted.length) continue
@@ -158,7 +167,7 @@ export class State {
             account = new Account({
                 id,
                 accountId,
-                balanceCNS: 0n,
+                balanceCNS: this.rangeMode ? -1n : 0n,
                 totalDepositedCNS: 0n,
                 totalWithdrawnCNS: 0n,
                 frozenStatus: 0,
@@ -203,6 +212,7 @@ export class State {
     }
 
     async openOrder(perpId: bigint, orderId: bigint): Promise<Order | undefined> {
+        if (this.skipOrders) return undefined
         if (orderId > 2147483647n) return undefined // can't match the int4 order_id column
         const key = `${perpId}-${orderId}`
         if (!this.openOrders.has(key)) {
@@ -222,6 +232,7 @@ export class State {
     private freshOrders = new Set<Order>()
 
     addOpenOrder(order: Order) {
+        if (this.skipOrders) return
         this.freshOrders.add(order)
         this.openOrders.set(`${order.market.id}-${order.orderId}`, order)
         this.dirty.add(order)
@@ -256,6 +267,14 @@ export class State {
         this.touch(account, m)
     }
 
+    private orphans: {kind: string; perpId: bigint; orderId: bigint; m: Meta; lot?: bigint; price?: bigint; expiry?: bigint; reason?: string}[] = []
+
+    /** An event for an order this processor has no open row for. Only kept in range mode; ids beyond int4 never match. */
+    orphan(kind: 'CHANGE' | 'CANCEL' | 'CLEAR' | 'FILL', perpId: bigint, orderId: bigint, m: Meta, data: {lot?: bigint; price?: bigint; expiry?: bigint; reason?: string} = {}) {
+        if (!this.rangeMode || this.skipOrders || orderId > 2147483647n) return
+        this.orphans.push({kind, perpId, orderId, m, ...data})
+    }
+
     insert(entity: Trade | PositionChange | CollateralTransfer) {
         this.inserts.push(entity)
     }
@@ -272,7 +291,8 @@ export class State {
             parts.push(`${name} ${rows.length}r/${Date.now() - t}ms`)
         }
         // Finalized blocks only, and only if the store really has no change tracker; otherwise undefined -> normal path.
-        const em = this.bulk ? finalizedManager(this.store) : undefined
+        const finalized = finalizedManager(this.store)
+        const em = this.bulk ? finalized : undefined
         // Parents first, so foreign keys resolve.
         for (const cls of [Market, Account, Position, Order, Funding] as const) {
             const rows = [...this.dirty].filter((e) => e instanceof cls)
@@ -283,6 +303,28 @@ export class State {
         for (const cls of [Trade, PositionChange, CollateralTransfer] as const) {
             const rows = this.inserts.filter((e) => e instanceof cls)
             await timed(cls.name.toLowerCase(), rows, () => (em ? bulkWrite(em, cls as any, rows, 'insert') : this.store.insert(rows as any[])))
+        }
+        if (this.orphans.length) {
+            // Range mode only ever runs on finalized blocks; if this is somehow a hot block, there is nowhere safe to put them.
+            const o = this.orphans
+            await timed(finalized ? 'orphans' : 'orphans DROPPED', o, async () => {
+                if (!finalized) return
+                if (!orphanTableReady) {
+                    await finalized.query(
+                        `create table if not exists zz_orphan_order_event (block int4 not null, log_index int4 not null, block_time timestamptz not null, ` +
+                            `kind text not null, perp_id text not null, order_id int4 not null, lot numeric, price numeric, expiry numeric, reason text, ` +
+                            `primary key (block, log_index))`
+                    )
+                    orphanTableReady = true
+                }
+                const col = <T>(f: (x: (typeof o)[number]) => T) => o.map((x) => f(x) ?? null)
+                await finalized.query(
+                    `insert into zz_orphan_order_event select * from unnest($1::int4[], $2::int4[], $3::timestamptz[], $4::text[], $5::text[], $6::int4[], ` +
+                        `$7::numeric[], $8::numeric[], $9::numeric[], $10::text[]) on conflict do nothing`,
+                    [col((x) => x.m.block), col((x) => x.m.logIndex), col((x) => x.m.time), col((x) => x.kind), col((x) => x.perpId.toString()),
+                     col((x) => Number(x.orderId)), col((x) => x.lot?.toString()), col((x) => x.price?.toString()), col((x) => x.expiry?.toString()), col((x) => x.reason)]
+                )
+            })
         }
         if (em) parts.unshift('bulk')
         this.flushStats = parts.join(', ')

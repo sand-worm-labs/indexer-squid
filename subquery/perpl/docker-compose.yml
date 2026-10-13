@@ -1,0 +1,69 @@
+# Local SubQuery stack: Postgres, the indexer node and the GraphQL query service.
+#   npm run dev          codegen + build + start
+#   npm run reset        stop and delete the local database (start again from START_BLOCK)
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: ./docker/pg-Dockerfile
+    ports:
+      - "127.0.0.1:5433:5432"   # 5433 on the host, so it does not clash with another local Postgres
+    volumes:
+      - .data/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  subquery-node:
+    image: subquerynetwork/subql-node-ethereum:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      DB_USER: postgres
+      DB_PASS: postgres
+      DB_DATABASE: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+    volumes:
+      - ./:/app
+    command:
+      - -f=/app
+      - --db-schema=app
+      # How many blocks are fetched and processed in parallel. Raise them if the RPC allows it, lower them if it rate-limits.
+      - --workers=4
+      - --batch-size=30
+      # Backfill settings: no per-block history of every row, and only final blocks. Much less to write.
+      - --disable-historical=true
+      - --unfinalized-blocks=false
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://subquery-node:3000/ready"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  graphql-engine:
+    image: subquerynetwork/subql-query:latest
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      subquery-node:
+        condition: service_healthy
+    restart: always
+    environment:
+      DB_USER: postgres
+      DB_PASS: postgres
+      DB_DATABASE: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+    command:
+      - --name=app
+      - --playground
+      - --indexer=http://subquery-node:3000

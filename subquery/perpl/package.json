@@ -1,0 +1,26 @@
+{
+  "name": "perpl-subquery",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Perpl Exchange indexer for Monad mainnet, built with SubQuery",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "subql build",
+    "codegen": "subql codegen",
+    "start:docker": "docker compose pull && docker compose up --remove-orphans",
+    "dev": "subql codegen && subql build && docker compose pull && docker compose up --remove-orphans",
+    "reset": "docker compose down -v && rm -rf .data"
+  },
+  "files": ["dist", "schema.graphql", "project.yaml"],
+  "dependencies": {
+    "@subql/types-ethereum": "latest",
+    "assert": "^2.0.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@subql/cli": "latest",
+    "@subql/node-ethereum": "latest",
+    "ethers": "^5.7.2",
+    "typescript": "latest"
+  }
+}

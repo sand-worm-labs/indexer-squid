@@ -1,0 +1,222 @@
+# Perpl Exchange (Monad). Amounts are raw on-chain integers; use the Market's decimals to scale:
+#   *PNS = price  (x 10^priceDecimals)    *LNS = lot size (x 10^lotDecimals)
+#   *CNS = collateral token units         *Hdths = hundredths   *Per100K = per 100,000
+# Same entities as the Subsquid indexer (indexers/perpl), plus OpenOrder.
+
+enum PositionType {
+  LONG
+  SHORT
+}
+
+enum OrderType {
+  OPEN_LONG
+  OPEN_SHORT
+  CLOSE_LONG
+  CLOSE_SHORT
+}
+
+enum OrderStatus {
+  OPEN
+  FILLED
+  CANCELLED
+  CLEARED
+}
+
+enum PositionStatus {
+  OPEN
+  CLOSED
+}
+
+enum PositionChangeKind {
+  OPENED
+  INCREASED
+  DECREASED
+  CLOSED
+  INVERTED
+  LIQUIDATED
+  DELEVERAGED
+  UNWOUND
+  COLLATERAL_INCREASED
+  COLLATERAL_DECREASED
+}
+
+enum TradeRole {
+  MAKER
+  TAKER
+}
+
+enum TransferKind {
+  DEPOSIT
+  WITHDRAWAL
+}
+
+type Market @entity {
+  "perpId"
+  id: ID!
+  perpId: Int! @index
+  name: String!
+  symbol: String! @index
+  status: Int!
+  paused: Boolean!
+  removed: Boolean!
+  basePricePNS: BigInt!
+  priceDecimals: Int!
+  lotDecimals: Int!
+  initMarginFracHdths: BigInt!
+  maintMarginFracHdths: BigInt!
+  maxOpenInterestLNS: BigInt!
+  "fee schedule (V2 markets); V1 markets use the flat rates below"
+  feeScheduleId: BigInt
+  takerFeePer100K: BigInt
+  makerFeePer100K: BigInt
+  markPricePNS: BigInt
+  oraclePricePNS: BigInt
+  oracleTimestamp: BigInt
+  lastFundingRatePct100K: BigInt
+  lastFundingBlock: Int
+  createdBlock: Int!
+  createdAt: Date!
+  updatedBlock: Int!
+  updatedAt: Date!
+}
+
+type Account @entity {
+  "accountId"
+  id: ID!
+  accountId: BigInt! @index
+  "owner address"
+  address: String @index
+  "last balance seen in an event"
+  balanceCNS: BigInt!
+  totalDepositedCNS: BigInt!
+  totalWithdrawnCNS: BigInt!
+  frozenStatus: Int!
+  createdBlock: Int!
+  createdAt: Date!
+  updatedBlock: Int!
+  updatedAt: Date!
+}
+
+"Order ids are small and can be reused, so the entity id is the placing log, not the orderId."
+type Order @entity {
+  id: ID!
+  orderId: Int! @index
+  market: Market!
+  account: Account!
+  orderType: OrderType!
+  status: OrderStatus!
+  pricePNS: BigInt!
+  "size asked for in the request"
+  requestedLotLNS: BigInt!
+  "size still resting on the book"
+  lotLNS: BigInt!
+  "size filled while resting (maker fills)"
+  filledLotLNS: BigInt!
+  expiryBlock: BigInt!
+  postOnly: Boolean!
+  fillOrKill: Boolean!
+  immediateOrCancel: Boolean!
+  leverageHdths: BigInt!
+  "set when status is CLEARED, e.g. CANCELLED_BY_ADMIN, EXPIRED"
+  endReason: String
+  createdBlock: Int! @index
+  createdAt: Date!
+  updatedBlock: Int!
+  updatedAt: Date!
+  txHash: String!
+}
+
+"Which Order row is currently open for a (market, orderId). Lets a fill or cancel find its order with one lookup by id."
+type OpenOrder @entity {
+  "perpId-orderId"
+  id: ID!
+  "id of the Order entity"
+  orderRef: String!
+}
+
+type Trade @entity {
+  id: ID!
+  market: Market!
+  account: Account!
+  "resting order that was filled (maker fills only)"
+  order: Order
+  role: TradeRole!
+  pricePNS: BigInt!
+  lotLNS: BigInt!
+  feeCNS: BigInt!
+  "collateral change for the account"
+  amountCNS: BigInt!
+  balanceCNS: BigInt!
+  builderId: BigInt
+  builderFeeCNS: BigInt
+  block: Int! @index
+  blockTime: Date! @index
+  txHash: String!
+}
+
+"One row per (market, account); reused when the position is reopened."
+type Position @entity {
+  "perpId-accountId"
+  id: ID!
+  market: Market!
+  account: Account!
+  positionType: PositionType!
+  status: PositionStatus! @index
+  lotLNS: BigInt!
+  depositCNS: BigInt!
+  leverageHdths: BigInt
+  "price of the fill that opened (or inverted) the current position"
+  openPricePNS: BigInt!
+  realizedPnlCNS: BigInt!
+  fundingCNS: BigInt!
+  openedBlock: Int!
+  openedAt: Date!
+  closedAt: Date
+  updatedBlock: Int!
+  updatedAt: Date!
+}
+
+type PositionChange @entity {
+  id: ID!
+  position: Position!
+  market: Market!
+  account: Account!
+  kind: PositionChangeKind!
+  positionType: PositionType!
+  pricePNS: BigInt
+  lotBeforeLNS: BigInt!
+  lotAfterLNS: BigInt!
+  depositBeforeCNS: BigInt!
+  depositAfterCNS: BigInt!
+  deltaPnlCNS: BigInt
+  fundingCNS: BigInt
+  block: Int! @index
+  blockTime: Date! @index
+  txHash: String!
+}
+
+type Funding @entity {
+  "perpId-fundingBlock"
+  id: ID!
+  market: Market!
+  fundingBlock: Int! @index
+  specifiedRatePct100K: BigInt!
+  actualRatePct100K: BigInt!
+  fundingPricePNS: BigInt!
+  fundingPaymentPNS: BigInt!
+  fundingSumPNS: BigInt!
+  block: Int!
+  blockTime: Date!
+  txHash: String!
+}
+
+type CollateralTransfer @entity {
+  id: ID!
+  account: Account!
+  kind: TransferKind!
+  amountCNS: BigInt!
+  balanceCNS: BigInt!
+  block: Int! @index
+  blockTime: Date! @index
+  txHash: String!
+}
