@@ -17,7 +17,7 @@ SANDWORM_CLOUD_DB_PORT=23798               # optional
 ENABLED_SQUIDS=perpl,usdc                  # optional; unset means every squid
 ```
 
-Each squid also has its own `.env` (written by `./squids setup`) with `START_BLOCK` and either `CONTRACT_ADDRESS` (EVM) or `PROGRAM_ID` (Solana). A squid with that value empty is skipped on start.
+Each squid also has its own `.env` (written by `./squids setup`) with `START_BLOCK` and either `CONTRACT_ADDRESS` (EVM) or `WALLET_ADDRESS` (Solana, comma-separated wallets). A squid with that value empty is skipped on start.
 
 ## Run with the `squids` script
 

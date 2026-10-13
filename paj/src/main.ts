@@ -3,8 +3,9 @@ import {DataSourceBuilder} from '@subsquid/solana-stream'
 import {createLogger} from '@subsquid/logger'
 import {TypeormDatabase} from '@subsquid/typeorm-store'
 
-// TODO: set the program id, then add handlers.
-const PROGRAM_ID = process.env.PROGRAM_ID ?? ''
+// Follows the wallets in WALLET_ADDRESS (comma-separated): transactions it pays for, its SOL balance changes (incl. incoming transfers),
+// and changes to token accounts it owns. TODO: add handlers that store these.
+const WALLETS = (process.env.WALLET_ADDRESS ?? '').split(',').map((w) => w.trim()).filter(Boolean)
 const START_BLOCK = Number(process.env.START_BLOCK ?? 0)
 
 const dataSource = new DataSourceBuilder()
@@ -15,19 +16,27 @@ const dataSource = new DataSourceBuilder()
     .setBlockRange({from: START_BLOCK})
     .setFields({
         block: {timestamp: true},
-        transaction: {signatures: true},
-        instruction: {programId: true, accounts: true, data: true},
+        transaction: {signatures: true, feePayer: true, err: true},
+        balance: {pre: true, post: true},
+        tokenBalance: {preMint: true, postMint: true, preOwner: true, postOwner: true, preAmount: true, postAmount: true},
     })
-    .addInstruction({
-        where: {programId: [PROGRAM_ID]},
-        include: {transaction: true},
-    })
+    .addTransaction({where: {feePayer: WALLETS}})
+    .addBalance({where: {account: WALLETS}, include: {transaction: true}})
+    .addTokenBalance({where: {preOwner: WALLETS}, include: {transaction: true}})
+    .addTokenBalance({where: {postOwner: WALLETS}, include: {transaction: true}})
     .build()
 
 const database = new TypeormDatabase({supportHotBlocks: true, stateSchema: process.env.DB_SCHEMA})
 const log = createLogger('sqd:processor')
 
 run(dataSource, database, async (ctx) => {
-    const count = ctx.blocks.reduce((n, b) => n + b.instructions.length, 0)
-    if (count > 0) log.info(`${count} instructions in slots ${ctx.blocks[0].header.number}..${ctx.blocks.at(-1)!.header.number}`)
+    let txs = 0, balances = 0, tokens = 0
+    for (const b of ctx.blocks) {
+        txs += b.transactions.length
+        balances += b.balances.length
+        tokens += b.tokenBalances.length
+    }
+    if (txs + balances + tokens > 0) {
+        log.info(`${txs} txs, ${balances} sol balance changes, ${tokens} token balance changes in slots ${ctx.blocks[0].header.number}..${ctx.blocks.at(-1)!.header.number}`)
+    }
 })
