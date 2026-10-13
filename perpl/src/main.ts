@@ -4,7 +4,7 @@ import {DataSourceBuilder} from '@subsquid/evm-stream'
 import {createLogger} from '@subsquid/logger'
 import {TypeormDatabase} from '@subsquid/typeorm-store'
 import {handle, topics} from './handlers'
-import {Cache, State} from './state'
+import {State} from './state'
 
 // Perpl Exchange proxy on Monad mainnet (chain 143).
 // ABI revision: rc_v1.1.7-203-g0e5902dd (see abi/Exchange.json).
@@ -29,14 +29,8 @@ const dataSource = new DataSourceBuilder()
 const database = new TypeormDatabase({supportHotBlocks: true, stateSchema: process.env.DB_SCHEMA})
 const log = createLogger('sqd:processor')
 
-// Keeps entities in memory between batches while backfilling, so hot markets/accounts/positions/orders
-// aren't re-read from Postgres every batch. Dropped at the chain head, where hot-block rollbacks can happen.
-const cache = new Cache()
-const MAX_CACHED = 500_000
-
 run(dataSource, database, async (ctx) => {
-    if (ctx.isHead) cache.clear()
-    const state = new State(ctx.store, cache)
+    const state = new State(ctx.store)
     let count = 0
     for (const block of ctx.blocks.map(augmentBlock)) {
         for (const l of block.logs) {
@@ -54,7 +48,6 @@ run(dataSource, database, async (ctx) => {
         }
     }
     await state.flush()
-    if (ctx.isHead || cache.size > MAX_CACHED) cache.clear()
     if (count > 0) {
         log.info(`Processed ${count} events from block ${ctx.blocks.at(0)?.header.number} to ${ctx.blocks.at(-1)?.header.number}`)
     }
