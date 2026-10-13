@@ -1,4 +1,5 @@
 import {Store} from '@subsquid/typeorm-store'
+import {In} from 'typeorm'
 import {
     Account,
     CollateralTransfer,
@@ -42,23 +43,81 @@ export interface OrderContext {
 export const positionType = (n: number) => (n === 0 ? PositionType.LONG : PositionType.SHORT)
 
 /**
- * Per-batch entity cache. Entities are loaded lazily, mutated by the handlers and written
- * back in one go by flush(). A fresh State is created for every batch.
+ * Entities that outlive a batch. Only valid while every batch is final: a rollback on hot blocks
+ * would leave it stale, so the caller must clear() it once the processor reaches the chain head.
+ */
+export class Cache {
+    markets = new Map<string, Market>()
+    accounts = new Map<string, Account>()
+    positions = new Map<string, Position>()
+    // Open order per `${perpId}-${orderId}`; null once known to be closed. Order ids are reused,
+    // so the lookup is always "the OPEN order with this id".
+    openOrders = new Map<string, Order | null>()
+
+    get size() {
+        return this.markets.size + this.accounts.size + this.positions.size + this.openOrders.size
+    }
+
+    clear() {
+        this.markets.clear()
+        this.accounts.clear()
+        this.positions.clear()
+        this.openOrders.clear()
+    }
+}
+
+/**
+ * Entity cache for one batch. Entities are loaded lazily, mutated by the handlers and written
+ * back in one go by flush(). The State is created per batch; the Cache it reads through may be shared.
  */
 export class State {
     orderContext?: OrderContext
 
-    private markets = new Map<string, Market>()
-    private accounts = new Map<string, Account>()
-    private positions = new Map<string, Position>()
+    private markets: Map<string, Market>
+    private accounts: Map<string, Account>
+    private positions: Map<string, Position>
+    private openOrders: Map<string, Order | null>
     private fundings = new Map<string, Funding>()
-    // Open order per `${perpId}-${orderId}`; null once known to be closed. Order ids are reused,
-    // so the lookup is always "the OPEN order with this id".
-    private openOrders = new Map<string, Order | null>()
     private dirty = new Set<Market | Account | Position | Order | Funding>()
     private inserts: (Trade | PositionChange | CollateralTransfer)[] = []
 
-    constructor(private store: Store) {}
+    constructor(private store: Store, cache: Cache = new Cache()) {
+        this.markets = cache.markets
+        this.accounts = cache.accounts
+        this.positions = cache.positions
+        this.openOrders = cache.openOrders
+    }
+
+    /** Loads, in one query per type, the entities a batch is going to need that aren't cached yet. */
+    async prefetch(ids: {perps: string[]; accounts: string[]; positions: string[]; orders: Map<string, Set<number>>}) {
+        const [markets, accounts, positions] = await Promise.all([
+            this.store.find(Market, {where: {id: In(ids.perps.filter((id) => !this.markets.has(id)))}}),
+            this.store.find(Account, {where: {id: In(ids.accounts.filter((id) => !this.accounts.has(id)))}}),
+            this.store.find(Position, {
+                where: {id: In(ids.positions.filter((id) => !this.positions.has(id)))},
+                relations: {market: true, account: true},
+            }),
+        ])
+        for (const x of markets) this.markets.set(x.id, x)
+        for (const x of accounts) this.accounts.set(x.id, x)
+        for (const x of positions) this.positions.set(x.id, x)
+
+        // Open orders: one query per market, served by the partial index on (market_id, order_id) WHERE status = 'OPEN'.
+        for (const [perpId, orderIds] of ids.orders) {
+            const wanted = [...orderIds].filter((id) => !this.openOrders.has(`${perpId}-${id}`))
+            if (!wanted.length) continue
+            const open = await this.store.find(Order, {
+                where: {market: {id: perpId}, orderId: In(wanted), status: OrderStatus.OPEN},
+                relations: {market: true, account: true},
+            })
+            const found = new Map<number, Order>()
+            for (const o of open) {
+                const prev = found.get(o.orderId)
+                if (!prev || o.createdBlock > prev.createdBlock) found.set(o.orderId, o)
+            }
+            for (const id of wanted) this.openOrders.set(`${perpId}-${id}`, found.get(id) ?? null)
+        }
+    }
 
     async market(perpId: bigint, m: Meta): Promise<Market> {
         const id = perpId.toString()
