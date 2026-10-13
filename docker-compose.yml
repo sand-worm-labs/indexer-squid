@@ -28,5 +28,24 @@ services:
       - "127.0.0.1:${SANDWORM_CLOUD_UI_PORT:-8080}:8080"
     environment:
       ADMINER_DEFAULT_SERVER: db
+  # Runs every enabled squid (processor + GraphQL API) under pm2. Start with: docker compose up -d --build squids
+  # Don't also run a squid with ./squids start: two processors on one schema corrupt it. Exclude it via ENABLED_SQUIDS.
+  squids:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SANDWORM_CLOUD_DB_USER: ${SANDWORM_CLOUD_DB_USER}
+      SANDWORM_CLOUD_DB_PASSWORD: ${SANDWORM_CLOUD_DB_PASSWORD}
+      SANDWORM_CLOUD_DB_NAME: ${SANDWORM_CLOUD_DB_NAME:-sandworm_cloud_db}
+      ENABLED_SQUIDS: ${ENABLED_SQUIDS:-}
+    volumes:
+      - ./perpl/.env:/app/perpl/.env:ro
+      - ./usdc/.env:/app/usdc/.env:ro
+      - ./paj/.env:/app/paj/.env:ro
+    ports:
+      - "127.0.0.1:4350-4355:4350-4355"
 volumes:
   pgdata:
