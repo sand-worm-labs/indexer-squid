@@ -23,7 +23,13 @@
       "WebSearch",
       "WebFetch(domain:docs.rs)",
       "Bash(pkill -f \"node lib/main.js\")",
-      "Bash(xargs -r kill)"
+      "Bash(xargs -r kill)",
+      "Read(//home/daniel/development/**)",
+      "Bash(ls -la ~/development/paj_cash_sqd | head; ls -la ~/development/pepl | head -5)",
+      "Read(//home/daniel/development/paj_cash_sqd/**)",
+      "Read(//home/daniel/development/pepl/**)",
+      "Bash(ls -A ~/development/paj_cash_sqd | head; cd ~/development && grep -rIl -i \"pajcash\\\\|paj_cash\\\\|paj cash\" --include=*.json --include=*.ts --include=*.md --include=*.env* --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | head)",
+      "Bash(curl -s -i \"http://localhost:8080/\")"
     ],
     "additionalDirectories": [
       "/home/daniel/development/perpl-squid",
