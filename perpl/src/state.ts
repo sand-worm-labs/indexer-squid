@@ -201,6 +201,7 @@ export class State {
     }
 
     async openOrder(perpId: bigint, orderId: bigint): Promise<Order | undefined> {
+        if (orderId > 2147483647n) return undefined // can't match the int4 order_id column
         const key = `${perpId}-${orderId}`
         if (!this.openOrders.has(key)) {
             const order = await this.store.findOne(Order, {
