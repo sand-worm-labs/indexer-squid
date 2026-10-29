@@ -1,0 +1,18 @@
+# HyperIndex port of indexers/usdc/schema.graphql (no @entity, DateTime -> Timestamp).
+type Transfer {
+  id: ID!
+  block: Int! @index
+  blockTime: Timestamp!
+  txHash: String!
+  from: String! @index
+  to: String! @index
+  value: BigInt!
+}
+
+type Holder {
+  # address
+  id: ID!
+  balance: BigInt!
+  transfersIn: Int!
+  transfersOut: Int!
+}
