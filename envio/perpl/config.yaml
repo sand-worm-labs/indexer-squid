@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: perpl
+description: Perpl Exchange (Monad mainnet), HyperIndex port of indexers/perpl
+# Rows are keyed by (id, chainId), so entity ids match the squid's ids exactly.
+disable_default_cross_chain: true
+# Every handler reads the transaction hash (block number and timestamp are selected by default).
+field_selection:
+  transaction_fields: [hash]
+contracts:
+  - name: Exchange
+    # The 49 events the squid's handlers.ts registers. Admin, config and diagnostic events are not indexed.
+    events:
+      - event: AccountCreated(address account, uint256 id)
+      - event: AccountFreeze(uint256 accountId, uint8 status)
+      - event: ClearingExpiredOrder(uint256 perpId, uint256 accountId, uint256 orderId, uint256 lockedBalanceCNS, uint256 recyclerAccountId, int256 recyclerAmountCNS, uint256 recyclerBalanceCNS)
+      - event: ClearingFrozenAccountOrder(uint256 perpId, uint256 accountId, uint256 orderId, uint256 lockedBalanceCNS, uint256 recyclerAccountId, int256 recyclerAmountCNS, uint256 recyclerBalanceCNS)
+      - event: ClearingInvalidCloseOrder(uint256 perpId, uint256 accountId, uint256 orderId, uint256 lockedBalanceCNS, uint256 recyclerAccountId, int256 recyclerAmountCNS, uint256 recyclerBalanceCNS)
+      - event: ClearingSelfMatchingOrder(uint256 perpId, uint256 accountId, uint256 orderId, uint256 lockedBalanceCNS, uint256 recyclerAccountId, int256 recyclerAmountCNS, uint256 recyclerBalanceCNS)
+      - event: CollateralDeposit(uint256 accountId, uint256 amountCNS, uint256 balanceCNS)
+      - event: CollateralWithdrawal(uint256 accountId, uint256 amountCNS, uint256 balanceCNS)
+      - event: ContractAdded(uint256 perpId, string name, string symbol, uint8 status, uint256 basePricePNS, uint256 priceDecimals, uint256 lotDecimals, uint256 takerFeePer100K, uint256 makerFeePer100K, uint256 initMarginFracHdths, uint256 maintMarginFracHdths, uint256 maxOpenInterestLNS, uint256 unityDescentThreshHdths, uint256 overColDescentThreshHdths, uint256 dcpBorrowThreshHdths, uint256 priceTolPer100K, uint256 marginTol, uint256 marginTolDecimals, uint256 refPriceMaxAgeSec, uint256 absFundingClampPctPer100K, uint256 permCancelMinOrders, uint256 permCancelSegment, uint256 insAmtPer100K, uint256 liqInsAmtPer100K, uint256 liqUserAmtPer100K, bool btlRestrictBuyers, uint256 btlPriceThreshPer100K, uint256 btlInsAmtPer100K, uint256 btlUserAmtPer100K, uint256 btlBuyerAmtPer100K, uint256 numPerpetuals)
+      - event: ContractAddedV2(uint256 perpId, string name, string symbol, uint8 status, uint256 basePricePNS, uint256 priceDecimals, uint256 lotDecimals, uint256 initMarginFracHdths, uint256 maintMarginFracHdths, uint256 maxOpenInterestLNS, uint256 unityDescentThreshHdths, uint256 overColDescentThreshHdths, uint256 dcpBorrowThreshHdths, uint256 priceTolPer100K, uint256 marginTol, uint256 marginTolDecimals, uint256 refPriceMaxAgeSec, uint256 absFundingClampPctPer100K, uint256 permCancelMinOrders, uint256 permCancelSegment, uint256 insAmtPer100K, uint256 liqInsAmtPer100K, uint256 liqUserAmtPer100K, bool btlRestrictBuyers, uint256 btlPriceThreshPer100K, uint256 btlInsAmtPer100K, uint256 btlUserAmtPer100K, uint256 btlBuyerAmtPer100K, uint256 numPerpetuals, uint256 perpFeeSchedId)
+      - event: ContractPaused(uint256 perpId, bool paused)
+      - event: ContractRemoved(uint256 perpId)
+      - event: FundingEventCompleted(uint256 perpId, uint256 fundingEventBlock, int256 specifiedRatePct100k, int256 actualRatePct100k, uint256 fundingPricePNS, int48 fundingPaymentPNS, int48 fundingSumPNS, bool allowOverwrite)
+      - event: IncreasePositionCollateral(uint256 perpId, uint256 accountId, uint256 positionDepositCNS, uint256 amountCNS, uint256 balanceCNS)
+      - event: InitialMarginFractionUpdated(uint256 perpId, uint256 initMarginFracHdths)
+      - event: LinkPriceUpdated(uint256 perpId, uint256 oraclePricePNS, uint256 timestamp)
+      - event: MaintenanceMarginFractionUpdated(uint256 perpId, uint256 maintMarginFracHdths)
+      - event: MakerFeeUpdated(uint256 perpId, uint256 makerFeePer100K)
+      - event: MakerOrderFilled(uint256 perpId, uint256 accountId, uint256 orderId, uint256 pricePNS, uint256 lotLNS, uint256 feeCNS, uint256 lockedBalanceCNS, int256 amountCNS, uint256 balanceCNS)
+      - event: MakerOrderFilledV2(uint256 perpId, uint256 accountId, uint256 orderId, uint256 pricePNS, uint256 lotLNS, uint256 feeCNS, uint256 lockedBalanceCNS, int256 amountCNS, uint256 balanceCNS, uint256 builderId, uint256 builderFeeCNS)
+      - event: MarkUpdated(uint256 perpId, uint256 pricePNS)
+      - event: MaxOpenInterestUpdated(uint256 perpId, uint256 maxOpenInterestLNS)
+      - event: OrderBatchCompleted(uint256 gasLeft)
+      - event: OrderCancelled(uint256 lockedBalanceCNS, int256 amountCNS, uint256 balanceCNS)
+      - event: OrderCancelledByAdmin(uint256 perpId, uint256 accountId, uint256 orderId, uint256 lockedBalanceCNS)
+      - event: OrderCancelledByLiquidator(uint256 perpId, uint256 accountId, uint256 orderId, uint256 lockedBalanceCNS)
+      - event: OrderChanged(uint256 orderId, uint256 pricePNS, uint256 lotLNS, uint256 expiryBlock, uint256 lockedBalanceCNS, uint256 balanceCNS)
+      - event: OrderPlaced(uint256 orderId, uint256 lotLNS, uint256 lockedBalanceCNS, int256 amountCNS, uint256 balanceCNS)
+      - event: OrderRequest(uint256 perpId, uint256 accountId, uint256 orderDescId, uint256 orderId, uint8 orderType, uint256 pricePNS, uint256 lotLNS, uint256 expiryBlock, bool postOnly, bool fillOrKill, bool immediateOrCancel, uint256 maxMatches, uint256 leverageHdths, uint256 lastExecutionBlock, uint256 amountCNS, uint256 maxNegPnlCollatBPS, uint256 gasLeft)
+      - event: OrderRequestV2(uint256 perpId, uint256 accountId, uint256 orderDescId, uint256 orderId, uint8 orderType, uint256 pricePNS, uint256 lotLNS, uint256 expiryBlock, bool postOnly, bool fillOrKill, bool immediateOrCancel, uint256 maxMatches, uint256 leverageHdths, uint256 lastExecutionBlock, uint256 amountCNS, uint256 maxNegPnlCollatBPS, uint256 gasLeft, bytes extension)
+      - event: PerpFeeSchedIdSet(uint256 indexed perpId, uint256 feeSchedId)
+      - event: PositionClosed(uint256 perpId, uint256 accountId, uint8 positionType, uint256 pricePNS, int256 deltaPnlCNS, int256 fundingCNS)
+      - event: PositionCollateralDecreased(uint256 perpId, uint256 accountId, uint8 positionType, uint256 markPricePNS, uint256 impactAdjPricePNS, uint256 startDepositCNS, uint256 endDepositCNS, uint256 startEntryPricePNS, uint256 endEntryPricePNS, uint256 effBmfHdths, uint256 decreaseCNS, uint256 balanceCNS)
+      - event: PositionDecreased(uint256 perpId, uint256 accountId, uint8 positionType, uint256 startDepositCNS, uint256 endDepositCNS, uint256 startLotLNS, uint256 endLotLNS, int256 deltaPnlCNS, int256 fundingCNS)
+      - event: PositionDeleveraged(uint256 perpId, uint256 accountId, bool forceClose, uint8 positionType, uint256 entryPricePNS, uint256 markPricePNS, uint256 deleveragePricePNS, int256 deltaPnlCNS, int256 fundingCNS, uint256 startDepositCNS, uint256 endDepositCNS, uint256 startLotLNS, uint256 endLotLNS, uint256 amountCNS, uint256 balanceCNS)
+      - event: PositionDeleveragedV2(uint256 perpId, uint256 accountId, bool forceClose, uint8 positionType, uint256 entryPricePNS, uint256 markPricePNS, uint256 deleveragePricePNS, int256 deltaPnlCNS, int256 fundingCNS, uint256 startDepositCNS, uint256 endDepositCNS, uint256 startLotLNS, uint256 endLotLNS, uint256 amountCNS, uint256 balanceCNS, uint256 priceResiduePNSQ16)
+      - event: PositionIncreased(uint256 perpId, uint256 accountId, uint8 positionType, uint256 leverageHdths, uint256 startDepositCNS, uint256 endDepositCNS, int256 pnlCollateralizedCNS, int256 premiumPnlSettledCNS, uint256 maxNegPnlCollatBPS, uint256 pricePNS, uint256 startLotLNS, uint256 endLotLNS, uint256 insFeeCNS, uint256 protFeeCNS)
+      - event: PositionIncreasedV2(uint256 perpId, uint256 accountId, uint8 positionType, uint256 leverageHdths, uint256 startDepositCNS, uint256 endDepositCNS, int256 pnlCollateralizedCNS, int256 premiumPnlSettledCNS, uint256 maxNegPnlCollatBPS, uint256 pricePNS, uint256 startLotLNS, uint256 endLotLNS, uint256 insFeeCNS, uint256 protFeeCNS, uint256 priceResiduePNSQ16)
+      - event: PositionInverted(uint256 perpId, uint256 accountId, uint8 positionType, uint256 leverageHdths, uint256 startDepositCNS, uint256 endDepositCNS, int256 pnlCollateralizedCNS, uint256 pricePNS, uint256 startLotLNS, uint256 endLotLNS, int256 deltaPnlCNS, int256 fundingCNS, uint256 insFeeCNS, uint256 protFeeCNS)
+      - event: PositionLiquidated(uint256 perpId, uint256 posAccountId, uint8 positionType, uint256 markPricePNS, uint256 liqPricePNS, uint256 liqLotLNS, uint256 posLotLNS, int256 deltaPnlCNS, int256 fundingCNS, int256 posAmountCNS, uint256 posDepositCNS, int256 accAmountCNS, uint256 accBalanceCNS, bool onOrderBook)
+      - event: PositionOpened(uint256 perpId, uint256 accountId, uint8 positionType, uint256 leverageHdths, uint256 depositCNS, int256 pnlCollateralizedCNS, uint256 pricePNS, uint256 lotLNS, uint256 insFeeCNS, uint256 protFeeCNS)
+      - event: PositionOpenedV2(uint256 perpId, uint256 accountId, uint8 positionType, uint256 leverageHdths, uint256 depositCNS, int256 pnlCollateralizedCNS, uint256 pricePNS, uint256 lotLNS, uint256 insFeeCNS, uint256 protFeeCNS, uint256 priceResiduePNSQ16)
+      - event: PositionUnwound(uint256 perpId, uint256 accountId, uint256 markPricePNS, uint8 positionType, uint256 pricePNS, uint256 lotLNS, uint256 depositCNS, int256 positionFmvCNS, uint256 paymentCNS, uint256 balanceCNS)
+      - event: PositionUnwoundV2(uint256 perpId, uint256 accountId, uint256 markPricePNS, uint8 positionType, uint256 pricePNS, uint256 lotLNS, uint256 depositCNS, int256 positionFmvCNS, uint256 paymentCNS, uint256 balanceCNS, uint256 priceResiduePNSQ16)
+      - event: PositionUnwoundWithoutPayment(uint256 perpId, uint256 accountId, uint256 markPricePNS, uint8 positionType, uint256 pricePNS, uint256 lotLNS, uint256 depositCNS, int256 positionFmvCNS, uint256 amountOwedCNS)
+      - event: PositionUnwoundWithoutPaymentV2(uint256 perpId, uint256 accountId, uint256 markPricePNS, uint8 positionType, uint256 pricePNS, uint256 lotLNS, uint256 depositCNS, int256 positionFmvCNS, uint256 amountOwedCNS, uint256 priceResiduePNSQ16)
+      - event: TakerFeeUpdated(uint256 perpId, uint256 takerFeePer100K)
+      - event: TakerOrderFilled(uint256 entryPricePNS, uint256 collatPricePNS, uint256 pnlPricePNS, uint256 lotLNS, uint256 feeCNS, int256 amountCNS, uint256 balanceCNS)
+      - event: TakerOrderFilledV2(uint256 entryPricePNS, uint256 collatPricePNS, uint256 pnlPricePNS, uint256 lotLNS, uint256 feeCNS, int256 amountCNS, uint256 balanceCNS, uint256 builderId, uint256 builderFeeCNS)
+chains:
+  - id: 143
+    # First log of the Exchange proxy. HyperSync would find it from 0 as well.
+    start_block: 54773010
+    contracts:
+      - name: Exchange
+        address:
+          - "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F"
